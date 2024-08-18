@@ -1,6 +1,5 @@
 -module(elogfind).
 
-%% API exports
 -export([main/1]).
 
 -define(LOG_LEVEL_LABEL_LIST, [
@@ -8,7 +7,7 @@
 ]).
 
 %%====================================================================
-%% API functions
+%% View
 %%====================================================================
 
 %% TODO 1 file name, 1 LineTarget
@@ -17,22 +16,44 @@
 main(_Args) ->
     {ListOut, MsgState} = fsm_begin("INFO hello", "hello"),
     io:format("~p ~p~n", [ListOut, MsgState]),
-    {ListOut2, MsgState2} = fsm({input, eof}, "hello", MsgState, ListOut),
+    {ListOut2, MsgState2} = fsm_input(eof, "hello", MsgState),
     io:format("~p ~p~n", [ListOut2, MsgState2]),
     erlang:halt(0).
-
-%%====================================================================
-%% Internal functions
-%%====================================================================
 
 -type msg_state() :: {print | noprint, last | nolast, MsgAcc :: list(string())}.
 -type out() :: {print, MsgAcc :: list(string())} | noprint.
 -type line_input() :: string() | eof.
+-type fsm_res() ::  {[out()], msg_state()}.
 
-fsm_begin(Line, LineTarget) ->
-    fsm({input, Line}, LineTarget, {noprint, nolast, []}, []).
+%%====================================================================
+%% fsm Controller
+%%====================================================================
 
 %%--------------------------------------------------------------------
+%% @doc
+-spec fsm_begin(Line :: line_input(), LineTarget :: string()) ->
+    fsm_res().
+%%--------------------------------------------------------------------
+fsm_begin(Line, LineTarget) ->
+    fsm({input, Line}, LineTarget, {noprint, nolast, []}, []).
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec fsm_input(Line :: line_input(), LineTarget :: string(), MsgState :: msg_state()) ->
+    fsm_res().
+%%--------------------------------------------------------------------
+fsm_input(Line, LineTarget, MsgState) ->
+    fsm({input, Line}, LineTarget, MsgState, []).
+%%--------------------------------------------------------------------
+
+%%====================================================================
+%% fsm service
+%%====================================================================
+
+%%--------------------------------------------------------------------
+%% TODO добавить логи fsm: СтейтCur -> СтейтNext: Вход
+%% TODO добавить тесты, написать более обобщённо
 %% @doc Log fsm
 %%     pre: LineTarget - valid
 %% @end
@@ -45,7 +66,7 @@ fsm_begin(Line, LineTarget) ->
     MsgState :: msg_state(),
     ListOut :: [out()]
 ) ->
-    {[out()], msg_state()}.
+    fsm_res().
 %%--------------------------------------------------------------------
 %% Добавить Line в MsgAcc, сменить или оставить nolast
 %% init
