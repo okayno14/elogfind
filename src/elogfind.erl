@@ -257,19 +257,21 @@ base_test_() ->
     [
         {"1 multiline", fun case1/0},
         {"1 multiline, 1 singleline", fun case2/0},
-        {"1 singleline", fun case3/0}
+        {"1 singleline", fun case3/0},
+        {"1 multiline not match, 1 singleline", fun case4/0},
+        {"1 multiline, 1 singleline not match", fun case5/0}
     ].
 
 case1() ->
     SampleList = [
-        "INFO hello",
-        "some text",
+        "INFO some",
+        "hello text",
         eof
     ],
 
     FinalList = [
-        "INFO hello",
-        "some text"
+        "INFO some",
+        "hello text"
     ],
 
     Out = read_lines_list_tester(SampleList, "hello"),
@@ -306,6 +308,43 @@ case3() ->
 
     FinalList = [
         "WARNING hello"
+    ],
+
+    Out = read_lines_list_tester(SampleList, "hello"),
+    ?LOG_NOTICE("=======", []),
+
+    ?assertEqual(FinalList, Out),
+    ok.
+
+case4() ->
+    SampleList = [
+        "INFO some",
+        "some text",
+        "WARNING hello",
+        eof
+    ],
+
+    FinalList = [
+        "WARNING hello"
+    ],
+
+    Out = read_lines_list_tester(SampleList, "hello"),
+    ?LOG_NOTICE("=======", []),
+
+    ?assertEqual(FinalList, Out),
+    ok.
+
+case5() ->
+    SampleList = [
+        "INFO hello",
+        "some text",
+        "WARNING some",
+        eof
+    ],
+
+    FinalList = [
+        "INFO hello",
+        "some text"
     ],
 
     Out = read_lines_list_tester(SampleList, "hello"),
