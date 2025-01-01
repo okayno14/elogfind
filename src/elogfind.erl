@@ -57,18 +57,25 @@ read_lines_list_tester(LineList, LineTarget) ->
     read_lines_list_tester_(LineList, LineTarget, FSM, Acc).
 
 read_lines_list_tester_([], _LineTarget, _FSM, Acc) ->
-    Acc;
+    F = fun
+    (Arg = [H | _]) when is_list(H) ->
+        Arg;
+
+    (Arg) ->
+        [Arg]
+
+    end,
+    lists:flatmap(F, lists:reverse(Acc));
 
 read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
     {Out, FSM2} = fsm_input(H, LineTarget, FSM),
 
     case Out of
-        %% TODO пока так
         [{print, [Msg]}] ->
-            read_lines_list_tester_(T, LineTarget, FSM2, Acc ++ [Msg]);
+            read_lines_list_tester_(T, LineTarget, FSM2, [Msg | Acc]);
 
         [{print, Msg}] ->
-            read_lines_list_tester_(T, LineTarget, FSM2, Acc ++ Msg);
+            read_lines_list_tester_(T, LineTarget, FSM2, [Msg | Acc]);
 
         _noprint ->
             read_lines_list_tester_(T, LineTarget, FSM2, Acc)
