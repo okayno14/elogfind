@@ -1,5 +1,6 @@
 -module(elogfind).
 
+-include_lib("kernel/include/logger.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 -export([main/1]).
@@ -117,10 +118,12 @@ fsm_input(Line, LineTarget, MsgState) ->
 %% Добавить Line в MsgAcc, сменить или оставить nolast
 %% init
 
-fsm({input, eof}, LineTarget, {Print, nolast, MsgAcc}, ListOut) ->
+fsm(Input = {input, eof}, LineTarget, MsgState = {Print, nolast, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     fsm({out, eof}, LineTarget, {Print, last, MsgAcc}, ListOut);
 
-fsm({input, Line}, LineTarget, {noprint, nolast, []}, ListOut = []) ->
+fsm(Input = {input, Line}, LineTarget, MsgState = {noprint, nolast, []}, ListOut = []) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case log_begins(Line) of
         true ->
             fsm({check, Line}, LineTarget, {noprint, nolast, [Line]}, ListOut);
@@ -129,7 +132,8 @@ fsm({input, Line}, LineTarget, {noprint, nolast, []}, ListOut = []) ->
             fsm({out, Line}, LineTarget, {noprint, last, [Line]}, ListOut)
     end;
 
-fsm({input, Line}, LineTarget, {noprint, nolast, MsgAcc}, ListOut) ->
+fsm(Input = {input, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case log_begins(Line) of
         true ->
             %% TODO чёт не уверен, что надо пихать в аккумулятор
@@ -140,7 +144,8 @@ fsm({input, Line}, LineTarget, {noprint, nolast, MsgAcc}, ListOut) ->
             fsm({check, Line}, LineTarget, {noprint, nolast, [Line | MsgAcc]}, ListOut)
     end;
 
-fsm({input, Line}, LineTarget, {print, nolast, MsgAcc}, ListOut) ->
+fsm(Input = {input, Line}, LineTarget, MsgState = {print, nolast, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case log_begins(Line) of
         true ->
             fsm({out, Line}, LineTarget, {print, last, [Line | MsgAcc]}, ListOut);
@@ -151,7 +156,8 @@ fsm({input, Line}, LineTarget, {print, nolast, MsgAcc}, ListOut) ->
 %%--------------------------------------------------------------------
 
 %% Сменить или оставить noprint
-fsm({check, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, ListOut) ->
+fsm(Input = {check, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case match_target(Line, LineTarget) of
         true ->
             {lists:reverse(ListOut), {print, nolast, MsgAcc}};
@@ -160,7 +166,8 @@ fsm({check, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, ListOut) ->
             {lists:reverse(ListOut), MsgState}
     end;
 
-fsm({check, Line}, LineTarget, MsgState = {noprint, last, MsgAcc}, ListOut) ->
+fsm(Input = {check, Line}, LineTarget, MsgState = {noprint, last, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case match_target(Line, LineTarget) of
         true ->
             fsm({out, Line}, LineTarget, {print, last, MsgAcc}, ListOut);
@@ -171,19 +178,23 @@ fsm({check, Line}, LineTarget, MsgState = {noprint, last, MsgAcc}, ListOut) ->
 %%--------------------------------------------------------------------
 
 %% pre last
-fsm({out, eof}, _LineTarget, {noprint, last, _MsgAcc}, ListOut) ->
+fsm(Input = {out, eof}, _LineTarget, MsgState = {noprint, last, _MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     {lists:reverse([noprint | ListOut]), {noprint, nolast, []}};
 
-fsm({out, eof}, _LineTarget, {print, last, MsgAcc}, ListOut) ->
+fsm(Input = {out, eof}, _LineTarget, MsgState = {print, last, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
     {ListOut2, {noprint, nolast, []}};
 
 %% bad path - дропнуть MsgAcc, дропнуть Line, выйти в receive
-fsm({out, _Line}, _LineTarget, {noprint, last, _MsgAcc}, ListOut) ->
+fsm(Input = {out, _Line}, _LineTarget, MsgState = {noprint, last, _MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     {lists:reverse([noprint | ListOut]), {noprint, nolast, []}};
 
 %% good path - переложить MsgAcc в ListOut, переложить Line в input
-fsm({out, Line}, LineTarget, {print, last, MsgAcc}, ListOut) ->
+fsm(Input = {out, Line}, LineTarget, MsgState = {print, last, MsgAcc}, ListOut) ->
+    ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
     fsm({input, Line}, LineTarget, {noprint, nolast, []}, ListOut2).
 %%--------------------------------------------------------------------
