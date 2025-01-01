@@ -256,7 +256,8 @@ match_target(Line, LineTarget) ->
 base_test_() ->
     [
         {"1 multiline", fun case1/0},
-        {"1 multiline, 1 singleline", fun case2/0}
+        {"1 multiline, 1 singleline", fun case2/0},
+        {"1 singleline", fun case3/0}
     ].
 
 case1() ->
@@ -296,3 +297,20 @@ case2() ->
 
     ?assertEqual(FinalList, Out),
     ok.
+
+case3() ->
+    SampleList = [
+        "WARNING hello",
+        eof
+    ],
+
+    FinalList = [
+        "WARNING hello"
+    ],
+
+    Out = read_lines_list_tester(SampleList, "hello"),
+    ?LOG_NOTICE("=======", []),
+
+    ?assertEqual(FinalList, Out),
+    ok.
+
