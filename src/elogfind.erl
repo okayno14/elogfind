@@ -129,11 +129,27 @@ read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
 -record(msg_state, {
     print :: print | noprint,
     last :: last | nolast,
-    msg_acc :: list(string())
+    msg_acc :: list(string()),
+    log_begins_re :: list()
 }).
 
 msg_state() ->
-    #msg_state{print = noprint, last = nolast, msg_acc = []}.
+    MakeReFun = fun(X) -> {ok, MP} = re:compile(X, [caseless]), MP end,
+    LogBeginsRe = [MakeReFun(LogLevelLabel) || LogLevelLabel <- ?LOG_LEVEL_LABEL_LIST],
+    #msg_state{print = noprint, last = nolast, msg_acc = [], log_begins_re = LogBeginsRe}.
+
+clean_msg_state(MsgState) ->
+    MsgState#msg_state{print = noprint, last = nolast, msg_acc = []}.
+
+print_msg_state(MsgState) ->
+    PropList =
+    lists:keydelete(log_begins_re, 1,
+        lists:zip(
+            record_info(fields, msg_state),
+            erlang:tl(erlang:tuple_to_list(MsgState))
+        )
+    ),
+    io_lib:format("~0tp", [PropList]).
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -178,12 +194,12 @@ fsm_input(Line, LineTarget, MsgState) ->
 %% init
 
 fsm(Input = {input, eof}, LineTarget, MsgState = #msg_state{last = nolast}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     fsm({out, eof}, LineTarget, MsgState#msg_state{last = last}, ListOut);
 
 fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = []}, ListOut = []) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
-    case log_begins(Line) of
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
             fsm({check, Line}, LineTarget, MsgState#msg_state{msg_acc = [Line]}, ListOut);
 
@@ -192,11 +208,11 @@ fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = noprint, la
     end;
 
 fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = MsgAcc}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
-    case log_begins(Line) of
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
             %% отбрасываем аккумулятор старого сообщения (потому что noprint), начинаем копить новое
-            MsgStateNew = msg_state(),
+            MsgStateNew = clean_msg_state(MsgState),
             fsm({check, Line}, LineTarget, MsgStateNew#msg_state{msg_acc = [Line]}, ListOut);
 
         false ->
@@ -204,8 +220,8 @@ fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = noprint, la
     end;
 
 fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = print, last = nolast, msg_acc = MsgAcc}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
-    case log_begins(Line) of
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
             fsm({out, Line}, LineTarget, MsgState#msg_state{last = last}, ListOut);
 
@@ -218,7 +234,7 @@ fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = print, last
 %% TODO переделать на переход в out
 %% Сменить или оставить noprint
 fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case match_target(Line, LineTarget) of
         true ->
             {lists:reverse(ListOut), MsgState#msg_state{print = print}};
@@ -228,7 +244,7 @@ fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, la
     end;
 
 fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case match_target(Line, LineTarget) of
         true ->
             fsm({out, Line}, LineTarget, MsgState#msg_state{print = print}, ListOut);
@@ -240,38 +256,29 @@ fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, la
 
 %% pre last
 fsm(Input = {out, eof}, _LineTarget, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
-    {lists:reverse([noprint | ListOut]), msg_state()};
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
 fsm(Input = {out, eof}, _LineTarget, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
-    {ListOut2, msg_state()};
+    {ListOut2, clean_msg_state(MsgState)};
 
 %% bad path - дропнуть MsgAcc, дропнуть Line, выйти в receive
 fsm(Input = {out, _Line}, _LineTarget, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
-    {lists:reverse([noprint | ListOut]), msg_state()};
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
 %% good path - переложить MsgAcc в ListOut, переложить Line в input
 fsm(Input = {out, Line}, LineTarget, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~p", [Input, MsgState]),
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
-    fsm({input, Line}, LineTarget, msg_state(), ListOut2).
+    fsm({input, Line}, LineTarget, clean_msg_state(MsgState), ListOut2).
 %%--------------------------------------------------------------------
 
-%%--------------------------------------------------------------------
-%% TODO переименовать?
-%% @doc
--spec log_begins(Line :: string()) ->
-    boolean().
-%%--------------------------------------------------------------------
-log_begins(Line) ->
+log_begins(LogBeginsRe, Line) ->
     Pred =
-    fun(LogLevelLabel) ->
-        %% TODO положить в стейт фсмки для экономии времени
-        {ok, MP} = re:compile(LogLevelLabel, [caseless]),
-
+    fun(MP) ->
         case re:run(Line, MP) of
             nomatch ->
                 false;
@@ -281,14 +288,13 @@ log_begins(Line) ->
         end
     end,
 
-    case lists:search(Pred, ?LOG_LEVEL_LABEL_LIST) of
+    case lists:search(Pred, LogBeginsRe) of
         {value, _} ->
             true;
 
         false ->
             false
     end.
-%%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
 %% @doc
