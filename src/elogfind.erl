@@ -63,8 +63,12 @@ read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
     {Out, FSM2} = fsm_input(H, LineTarget, FSM),
 
     case Out of
+        %% TODO пока так
+        [{print, [Msg]}] ->
+            read_lines_list_tester_(T, LineTarget, FSM2, Acc ++ [Msg]);
+
         [{print, Msg}] ->
-            read_lines_list_tester_(T, LineTarget, FSM2, Msg ++ Acc);
+            read_lines_list_tester_(T, LineTarget, FSM2, Acc ++ Msg);
 
         _noprint ->
             read_lines_list_tester_(T, LineTarget, FSM2, Acc)
