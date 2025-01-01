@@ -1,5 +1,7 @@
 -module(elogfind).
 
+-include_lib("eunit/include/eunit.hrl").
+
 -export([main/1]).
 
 -define(LOG_LEVEL_LABEL_LIST, [
@@ -10,23 +12,66 @@
 %% View
 %%====================================================================
 
+%% TODO Удалить ListOut
 %% TODO 1 file name, 1 LineTarget
-%% TODO сделать аргумент для запуска тестов
 %% escript Entry point
 main(_Args) ->
-    {ListOut, MsgState} = fsm_begin("INFO hello", "hello"),
-    io:format("~p ~p~n", [ListOut, MsgState]),
-    {ListOut2, MsgState2} = fsm_input(eof, "hello", MsgState),
-    io:format("~p ~p~n", [ListOut2, MsgState2]),
     erlang:halt(0).
 
--type msg_state() :: {print | noprint, last | nolast, MsgAcc :: list(string())}.
--type out() :: {print, MsgAcc :: list(string())} | noprint.
--type line_input() :: string() | eof.
--type fsm_res() ::  {[out()], msg_state()}.
+%%====================================================================
+%% fsm_stdout
+%%====================================================================
+
+%%--------------------------------------------------------------------
+-spec read_stdin_lines() ->
+    [] | string().
+%%--------------------------------------------------------------------
+read_stdin_lines() ->
+	read_lines(standard_io).
+%%--------------------------------------------------------------------
+
+%% TODO read_lines(file:open/2)
+
+%%--------------------------------------------------------------------
+-spec read_lines(Device :: io:device()) ->
+    [] | string().
+%%--------------------------------------------------------------------
+read_lines(Device) ->
+	read_lines(Device, []).
+
+read_lines(Device, L) ->
+     case io:get_line(Device, "") of
+		eof ->
+			lists:reverse(L);
+
+		String ->
+			read_lines(Device, [string:trim(String, trailing) | L])
+    end.
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+read_lines_list_tester(LineList, LineTarget) ->
+    Acc = [],
+    {_noprint, FSM} = fsm_begin("", LineTarget),
+    read_lines_list_tester_(LineList, LineTarget, FSM, Acc).
+
+read_lines_list_tester_([], _LineTarget, _FSM, Acc) ->
+    Acc;
+
+read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
+    {Out, FSM2} = fsm_input(H, LineTarget, FSM),
+
+    case Out of
+        [{print, Msg}] ->
+            read_lines_list_tester_(T, LineTarget, FSM2, Msg ++ Acc);
+
+        _noprint ->
+            read_lines_list_tester_(T, LineTarget, FSM2, Acc)
+    end.
+%%--------------------------------------------------------------------
 
 %%====================================================================
-%% fsm Controller
+%% fsm_core
 %%====================================================================
 
 %%--------------------------------------------------------------------
@@ -47,9 +92,10 @@ fsm_input(Line, LineTarget, MsgState) ->
     fsm({input, Line}, LineTarget, MsgState, []).
 %%--------------------------------------------------------------------
 
-%%====================================================================
-%% fsm service
-%%====================================================================
+-type msg_state() :: {print | noprint, last | nolast, MsgAcc :: list(string())}.
+-type out() :: {print, MsgAcc :: list(string())} | noprint.
+-type line_input() :: string() | eof.
+-type fsm_res() ::  {[out()], msg_state()}.
 
 %%--------------------------------------------------------------------
 %% TODO добавить логи fsm: СтейтCur -> СтейтNext: Вход
@@ -86,7 +132,9 @@ fsm({input, Line}, LineTarget, {noprint, nolast, []}, ListOut = []) ->
 fsm({input, Line}, LineTarget, {noprint, nolast, MsgAcc}, ListOut) ->
     case log_begins(Line) of
         true ->
+            %% TODO чёт не уверен, что надо пихать в аккумулятор
             fsm({check, Line}, LineTarget, {noprint, last, [Line | MsgAcc]}, ListOut);
+%             fsm({check, Line}, LineTarget, {noprint, last, MsgAcc}, ListOut);
 
         false ->
             fsm({check, Line}, LineTarget, {noprint, nolast, [Line | MsgAcc]}, ListOut)
@@ -100,6 +148,7 @@ fsm({input, Line}, LineTarget, {print, nolast, MsgAcc}, ListOut) ->
         false ->
             {lists:reverse(ListOut), {print, nolast, [Line | MsgAcc]}}
     end;
+%%--------------------------------------------------------------------
 
 %% Сменить или оставить noprint
 fsm({check, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, ListOut) ->
@@ -119,8 +168,8 @@ fsm({check, Line}, LineTarget, MsgState = {noprint, last, MsgAcc}, ListOut) ->
         false ->
             fsm({out, Line}, LineTarget, MsgState, ListOut)
     end;
+%%--------------------------------------------------------------------
 
-%% сменить ListOut
 %% pre last
 fsm({out, eof}, _LineTarget, {noprint, last, _MsgAcc}, ListOut) ->
     {lists:reverse([noprint | ListOut]), {noprint, nolast, []}};
@@ -183,4 +232,25 @@ match_target(Line, LineTarget) ->
             true
     end.
 %%--------------------------------------------------------------------
+
+%%%===================================================================
+%%% Test
+%%%===================================================================
+
+simple_test() ->
+    SampleList = [
+        "INFO hello",
+        "some text",
+        eof
+    ],
+
+    FinalList = [
+        "INFO hello",
+        "some text"
+    ],
+
+    Out = read_lines_list_tester(SampleList, "hello"),
+
+    ?assertEqual(FinalList, Out),
+    ok.
 
