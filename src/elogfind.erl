@@ -140,9 +140,8 @@ fsm(Input = {input, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, Lis
     ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case log_begins(Line) of
         true ->
-            %% TODO чёт не уверен, что надо пихать в аккумулятор
-            fsm({check, Line}, LineTarget, {noprint, last, [Line | MsgAcc]}, ListOut);
-%             fsm({check, Line}, LineTarget, {noprint, last, MsgAcc}, ListOut);
+            %% отбрасываем аккумулятор старого сообщения (потому что noprint), начинаем копить новое
+            fsm({check, Line}, LineTarget, {noprint, nolast, [Line]}, ListOut);
 
         false ->
             fsm({check, Line}, LineTarget, {noprint, nolast, [Line | MsgAcc]}, ListOut)
@@ -152,13 +151,15 @@ fsm(Input = {input, Line}, LineTarget, MsgState = {print, nolast, MsgAcc}, ListO
     ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
     case log_begins(Line) of
         true ->
-            fsm({out, Line}, LineTarget, {print, last, [Line | MsgAcc]}, ListOut);
+            fsm({out, Line}, LineTarget, {print, last, MsgAcc}, ListOut);
 
+        %% TODO переделать на переход в out
         false ->
             {lists:reverse(ListOut), {print, nolast, [Line | MsgAcc]}}
     end;
 %%--------------------------------------------------------------------
 
+%% TODO переделать на переход в out
 %% Сменить или оставить noprint
 fsm(Input = {check, Line}, LineTarget, MsgState = {noprint, nolast, MsgAcc}, ListOut) ->
     ?LOG_NOTICE("Input:~p MsgState:~p", [Input, MsgState]),
@@ -269,3 +270,21 @@ simple_test() ->
     ?assertEqual(FinalList, Out),
     ok.
 
+simple2_test() ->
+    SampleList = [
+        "INFO hello",
+        "some text",
+        "WARNING hello",
+        eof
+    ],
+
+    FinalList = [
+        "INFO hello",
+        "some text",
+        "WARNING hello"
+    ],
+
+    Out = read_lines_list_tester(SampleList, "hello"),
+
+    ?assertEqual(FinalList, Out),
+    ok.
