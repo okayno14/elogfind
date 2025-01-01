@@ -9,6 +9,8 @@
     "ERROR", "WARN", "INFO", "TRACE", "DEBUG"
 ]).
 
+-record(args, {line_target :: string()}).
+
 %%====================================================================
 %% View
 %%====================================================================
@@ -16,37 +18,74 @@
 %% TODO Удалить ListOut
 %% TODO 1 file name, 1 LineTarget
 %% escript Entry point
-main(_Args) ->
+main(Argv) ->
+    Args = parse_args(Argv, #args{}),
+    case Args =/= #args{} of
+        %% значит, что-то прочитали
+        true ->
+            read_stdin_lines(Args#args.line_target);
+
+        _false ->
+            ok
+    end,
     erlang:halt(0).
+
+parse_args([], Args) ->
+    Args;
+
+parse_args(Argv, Args) ->
+    {Argv2, Args2} = parse_key(Argv, Args),
+    parse_args(Argv2, Args2).
+
+parse_key(["-sep" | T], Args) ->
+    case T of
+        [LineTarget | T2] ->
+            {T2, Args#args{line_target = LineTarget}};
+
+        _ ->
+            {T, Args}
+    end;
+
+parse_key([_H | T], Args) ->
+    {T, Args}.
 
 %%====================================================================
 %% fsm_stdout
 %%====================================================================
 
 %%--------------------------------------------------------------------
--spec read_stdin_lines() ->
+-spec read_stdin_lines(LineTarget :: string()) ->
     [] | string().
 %%--------------------------------------------------------------------
-read_stdin_lines() ->
-	read_lines(standard_io).
+read_stdin_lines(LineTarget) ->
+	read_lines(standard_io, LineTarget).
 %%--------------------------------------------------------------------
 
 %% TODO read_lines(file:open/2)
 
 %%--------------------------------------------------------------------
--spec read_lines(Device :: io:device()) ->
+-spec read_lines(Device :: io:device(), LineTarget :: string()) ->
     [] | string().
 %%--------------------------------------------------------------------
-read_lines(Device) ->
-	read_lines(Device, []).
+read_lines(Device, LineTarget) ->
+    {_noprint, FSM} = fsm_begin("", LineTarget),
+	read_lines(Device, LineTarget, FSM).
 
-read_lines(Device, L) ->
+read_lines(Device, LineTarget, FSM) ->
      case io:get_line(Device, "") of
 		eof ->
-			lists:reverse(L);
+			ok;
 
 		String ->
-			read_lines(Device, [string:trim(String, trailing) | L])
+            {Out, FSM2} = fsm_input(String, LineTarget, FSM),
+            case Out of
+                [{print, Msg}] ->
+                    io:format("~ts", [Msg]);
+
+                _noprint ->
+                    ok
+            end,
+			read_lines(Device, LineTarget, FSM2)
     end.
 %%--------------------------------------------------------------------
 
