@@ -253,7 +253,13 @@ match_target(Line, LineTarget) ->
 %%% Test
 %%%===================================================================
 
-simple_test() ->
+base_test_() ->
+    [
+        {"1 multiline", fun case1/0},
+        {"1 multiline, 1 singleline", fun case2/0}
+    ].
+
+case1() ->
     SampleList = [
         "INFO hello",
         "some text",
@@ -266,11 +272,12 @@ simple_test() ->
     ],
 
     Out = read_lines_list_tester(SampleList, "hello"),
+    ?LOG_NOTICE("=======", []),
 
     ?assertEqual(FinalList, Out),
     ok.
 
-simple2_test() ->
+case2() ->
     SampleList = [
         "INFO hello",
         "some text",
@@ -285,6 +292,7 @@ simple2_test() ->
     ],
 
     Out = read_lines_list_tester(SampleList, "hello"),
+    ?LOG_NOTICE("=======", []),
 
     ?assertEqual(FinalList, Out),
     ok.
