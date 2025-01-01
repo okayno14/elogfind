@@ -56,7 +56,7 @@ read_lines_list_tester(LineList, LineTarget) ->
     {_noprint, FSM} = fsm_begin("", LineTarget),
     read_lines_list_tester_(LineList, LineTarget, FSM, Acc).
 
-read_lines_list_tester_([], _LineTarget, _FSM, Acc) ->
+read_lines_list_tester_([], _LineTarget, FSM, Acc) ->
     F = fun
     (Arg = [H | _]) when is_list(H) ->
         Arg;
@@ -65,7 +65,7 @@ read_lines_list_tester_([], _LineTarget, _FSM, Acc) ->
         [Arg]
 
     end,
-    lists:flatmap(F, lists:reverse(Acc));
+    {lists:flatmap(F, lists:reverse(Acc)), FSM};
 
 read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
     {Out, FSM2} = fsm_input(H, LineTarget, FSM),
@@ -110,8 +110,7 @@ fsm_input(Line, LineTarget, MsgState) ->
 -type fsm_res() ::  {[out()], msg_state()}.
 
 %%--------------------------------------------------------------------
-%% TODO добавить логи fsm: СтейтCur -> СтейтNext: Вход
-%% TODO добавить тесты, написать более обобщённо
+%% TODO Сделать для каждого входа отдельную функцию
 %% @doc Log fsm
 %%     pre: LineTarget - valid
 %% @end
@@ -281,10 +280,11 @@ case1() ->
         "hello text"
     ],
 
-    Out = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
+    ?assertEqual({noprint, nolast, []}, FSM),
     ok.
 
 case2() ->
@@ -301,10 +301,11 @@ case2() ->
         "WARNING hello"
     ],
 
-    Out = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
+    ?assertEqual({noprint, nolast, []}, FSM),
     ok.
 
 case3() ->
@@ -317,10 +318,11 @@ case3() ->
         "WARNING hello"
     ],
 
-    Out = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
+    ?assertEqual({noprint, nolast, []}, FSM),
     ok.
 
 case4() ->
@@ -335,10 +337,11 @@ case4() ->
         "WARNING hello"
     ],
 
-    Out = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
+    ?assertEqual({noprint, nolast, []}, FSM),
     ok.
 
 case5() ->
@@ -354,9 +357,10 @@ case5() ->
         "some text"
     ],
 
-    Out = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
+    ?assertEqual({noprint, nolast, []}, FSM),
     ok.
 
