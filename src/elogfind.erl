@@ -9,12 +9,13 @@
     "ERROR", "WARN", "INFO", "TRACE", "DEBUG"
 ]).
 
--record(args, {line_target :: string()}).
+-record(args, {line_target :: string(), file :: string()}).
 
 %%====================================================================
 %% View
 %%====================================================================
 
+%% TODO подумать над логикой парсинга ключей и генерации аргсов. Думаю, что лучше завести разные типы опций
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO Удалить ListOut
 %% TODO 1 file name, 1 LineTarget
@@ -22,6 +23,16 @@
 main(Argv) ->
     Args = parse_args(Argv, #args{}),
     case Args =/= #args{} of
+        true when Args#args.file =/= undefined ->
+            case file:open(Args#args.file, [read]) of
+                {ok, IoDevice} ->
+                    read_lines(IoDevice, Args#args.line_target);
+
+                {error, Reason} ->
+                    io:format(standard_error, "Failed to open file ~p by Reason:~p", [Args#args.file, Reason]),
+                    halt(1)
+            end;
+
         %% значит, что-то прочитали
         true ->
             read_stdin_lines(Args#args.line_target);
@@ -47,6 +58,15 @@ parse_key(["-sep" | T], Args) ->
             {T, Args}
     end;
 
+parse_key(["-f" | T], Args) ->
+    case T of
+        [File | T2] ->
+            {T2, Args#args{file = File}};
+
+        _ ->
+            {T, Args}
+    end;
+
 parse_key([_H | T], Args) ->
     {T, Args}.
 
@@ -61,8 +81,6 @@ parse_key([_H | T], Args) ->
 read_stdin_lines(LineTarget) ->
 	read_lines(standard_io, LineTarget).
 %%--------------------------------------------------------------------
-
-%% TODO read_lines(file:open/2)
 
 %%--------------------------------------------------------------------
 -spec read_lines(Device :: io:device(), LineTarget :: string()) ->
