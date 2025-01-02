@@ -173,7 +173,7 @@ print_msg_state(MsgState) ->
     fsm_res().
 %%--------------------------------------------------------------------
 fsm_begin(Line, LineTarget) ->
-    fsm({input, Line}, msg_state(LineTarget), []).
+    fsm_input(Line, msg_state(LineTarget), []).
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
@@ -182,7 +182,7 @@ fsm_begin(Line, LineTarget) ->
     fsm_res().
 %%--------------------------------------------------------------------
 fsm_input(Line, MsgState) ->
-    fsm({input, Line}, MsgState, []).
+    fsm_input(Line, MsgState, []).
 %%--------------------------------------------------------------------
 
 -type msg_state() :: #msg_state{}.
@@ -191,103 +191,97 @@ fsm_input(Line, MsgState) ->
 -type fsm_res() ::  {[out()], msg_state()}.
 
 %%--------------------------------------------------------------------
-%% TODO Сделать для каждого входа отдельную функцию
-%% @doc Log fsm
-%%     pre: LineTarget - valid
-%% @end
--spec fsm(
-    Cmd ::
-        {input, Line :: line_input()} |
-        {check, Line :: line_input()} |
-        {out, Line :: line_input()},
-    MsgState :: msg_state(),
-    ListOut :: [out()]
-) ->
+%% @doc Определяет границы полученных сообщений
+-spec fsm_input(Input :: line_input(), MsgState :: msg_state(), ListOut :: [out()]) ->
     fsm_res().
 %%--------------------------------------------------------------------
-%% Добавить Line в MsgAcc, сменить или оставить nolast
-%% init
-
-fsm(Input = {input, eof}, MsgState = #msg_state{last = nolast}, ListOut) ->
+fsm_input(Input = eof, MsgState = #msg_state{last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    fsm({out, eof}, MsgState#msg_state{last = last}, ListOut);
+    fsm_out(eof, MsgState#msg_state{last = last}, ListOut);
 
-fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = []}, ListOut = []) ->
+fsm_input(Input = Line, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = []}, ListOut = []) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
-            fsm({check, Line}, MsgState#msg_state{msg_acc = [Line]}, ListOut);
+            fsm_check_line(Line, MsgState#msg_state{msg_acc = [Line]}, ListOut);
 
+        %% При обнулённом стейте получили первую строку без метки границы сообщения. Отбрасываем.
         false ->
-            fsm({out, Line}, MsgState#msg_state{last = last, msg_acc = [Line]}, ListOut)
+            fsm_out(Line, MsgState#msg_state{last = last, msg_acc = [Line]}, ListOut)
     end;
 
-fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
+fsm_input(Input = Line, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
             %% отбрасываем аккумулятор старого сообщения (потому что noprint), начинаем копить новое
             MsgStateNew = clean_msg_state(MsgState),
-            fsm({check, Line}, MsgStateNew#msg_state{msg_acc = [Line]}, ListOut);
+            fsm_check_line(Line, MsgStateNew#msg_state{msg_acc = [Line]}, ListOut);
 
         false ->
-            fsm({check, Line}, MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}, ListOut)
+            fsm_check_line(Line, MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}, ListOut)
     end;
 
-fsm(Input = {input, Line}, MsgState = #msg_state{print = print, last = nolast}, ListOut) ->
+fsm_input(Input = Line, MsgState = #msg_state{print = print, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
-            fsm({out, Line}, MsgState#msg_state{last = last}, ListOut);
+            fsm_out(Line, MsgState#msg_state{last = last}, ListOut);
 
         false ->
-            fsm({out, Line}, MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}, ListOut)
-    end;
+            fsm_out(Line, MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}, ListOut)
+    end.
 %%--------------------------------------------------------------------
 
-%% Проверка полученной строки. Помечает сообщение print, в случае успеха
-%% require:
-%%   Line содержится в Input и хранится в MsgState#msg_state.msg_acc
-fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
+%%--------------------------------------------------------------------
+%% @doc Проверка полученной строки. Помечает сообщение print, в случае успеха
+-spec fsm_check_line(Line :: line_input(), MsgState :: msg_state(), ListOut :: [out()]) ->
+    fsm_res().
+%%--------------------------------------------------------------------
+fsm_check_line(Input = Line, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case match_target(Line, MsgState#msg_state.line_target) of
         true ->
-            fsm({out, Line}, MsgState#msg_state{print = print}, ListOut);
+            fsm_out(Line, MsgState#msg_state{print = print}, ListOut);
 
         false ->
-            fsm({out, Line}, MsgState, ListOut)
+            fsm_out(Line, MsgState, ListOut)
     end;
 
-fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
+fsm_check_line(Input = Line, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case match_target(Line, MsgState#msg_state.line_target) of
         true ->
-            fsm({out, Line}, MsgState#msg_state{print = print}, ListOut);
+            fsm_out(Line, MsgState#msg_state{print = print}, ListOut);
 
         false ->
-            fsm({out, Line}, MsgState, ListOut)
-    end;
+            fsm_out(Line, MsgState, ListOut)
+    end.
 %%--------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+-spec fsm_out(Line :: line_input(), MsgState :: msg_state(), ListOut :: [out()]) ->
+    fsm_res().
+%%--------------------------------------------------------------------
 %% Line не относится к текущему сообщению, делаем переход:
 %% Переложить MsgAcc в ListOut, перейти в Input с Line
-fsm(Input = {out, Line}, MsgState = #msg_state{print = print, last = last}, ListOut) ->
+fsm_out(Input = Line, MsgState = #msg_state{print = print, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     ListOut2 = [{print, lists:reverse(MsgState#msg_state.msg_acc)} | ListOut],
     case Line of
         eof ->
             {lists:reverse(ListOut2), clean_msg_state(MsgState)};
         _ ->
-            fsm({input, Line}, clean_msg_state(MsgState), ListOut2)
+            fsm_input(Line, clean_msg_state(MsgState), ListOut2)
     end;
 
 %% Возвращаем noprint, т.к. пропарсили всё сообщение и не нашли LineTarget
-fsm(Input = {out, _}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
+fsm_out(Input, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
 %% Сообщение ещё полностью не обработано. Просто выходим.
-fsm(Input = {out, _}, MsgState = #msg_state{last = nolast}, ListOut) ->
+fsm_out(Input, MsgState = #msg_state{last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     {lists:reverse(ListOut), MsgState}.
 %%--------------------------------------------------------------------
