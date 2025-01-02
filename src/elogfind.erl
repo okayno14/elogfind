@@ -17,7 +17,6 @@
 
 %% TODO подумать над логикой парсинга ключей и генерации аргсов. Думаю, что лучше завести разные типы опций
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
-%% TODO Удалить ListOut
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
 %% escript Entry point
 main(Argv) ->
@@ -241,22 +240,22 @@ fsm(Input = {input, Line}, MsgState = #msg_state{print = print, last = nolast}, 
         true ->
             fsm({out, Line}, MsgState#msg_state{last = last}, ListOut);
 
-        %% TODO переделать на переход в out
         false ->
-            {lists:reverse(ListOut), MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}}
+            fsm({out, Line}, MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}, ListOut)
     end;
 %%--------------------------------------------------------------------
 
-%% TODO переделать на переход в out
-%% Сменить или оставить noprint
+%% Проверка полученной строки. Помечает сообщение print, в случае успеха
+%% require:
+%%   Line содержится в Input и хранится в MsgState#msg_state.msg_acc
 fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case match_target(Line, MsgState#msg_state.line_target) of
         true ->
-            {lists:reverse(ListOut), MsgState#msg_state{print = print}};
+            fsm({out, Line}, MsgState#msg_state{print = print}, ListOut);
 
         false ->
-            {lists:reverse(ListOut), MsgState}
+            fsm({out, Line}, MsgState, ListOut)
     end;
 
 fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
@@ -270,26 +269,27 @@ fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = last}, 
     end;
 %%--------------------------------------------------------------------
 
-%% pre last
-fsm(Input = {out, eof}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
-
-fsm(Input = {out, eof}, MsgState = #msg_state{print = print, last = last}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    ListOut2 = [{print, lists:reverse(MsgState#msg_state.msg_acc)} | ListOut],
-    {ListOut2, clean_msg_state(MsgState)};
-
-%% bad path - дропнуть MsgAcc, дропнуть Line, выйти в receive
-fsm(Input = {out, _Line}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
-    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
-
-%% good path - переложить MsgAcc в ListOut, переложить Line в input
+%% Line не относится к текущему сообщению, делаем переход:
+%% Переложить MsgAcc в ListOut, перейти в Input с Line
 fsm(Input = {out, Line}, MsgState = #msg_state{print = print, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     ListOut2 = [{print, lists:reverse(MsgState#msg_state.msg_acc)} | ListOut],
-    fsm({input, Line}, clean_msg_state(MsgState), ListOut2).
+    case Line of
+        eof ->
+            {lists:reverse(ListOut2), clean_msg_state(MsgState)};
+        _ ->
+            fsm({input, Line}, clean_msg_state(MsgState), ListOut2)
+    end;
+
+%% Возвращаем noprint, т.к. пропарсили всё сообщение и не нашли LineTarget
+fsm(Input = {out, _}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
+
+%% Сообщение ещё полностью не обработано. Просто выходим.
+fsm(Input = {out, _}, MsgState = #msg_state{last = nolast}, ListOut) ->
+    ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
+    {lists:reverse(ListOut), MsgState}.
 %%--------------------------------------------------------------------
 
 log_begins(LogBeginsRe, Line) ->
@@ -336,6 +336,7 @@ base_test_() ->
         {"1 multiline", fun case1/0},
         {"1 multiline, 1 singleline", fun case2/0},
         {"1 singleline", fun case3/0},
+        {"1 multiline, 1 multiline", fun case6/0},
         {"1 multiline not match, 1 singleline", fun case4/0},
         {"1 multiline, 1 singleline not match", fun case5/0}
     ].
@@ -427,6 +428,31 @@ case5() ->
     FinalList = [
         "INFO hello",
         "some text"
+    ],
+
+    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    ?LOG_DEBUG("=======", []),
+
+    ?assertEqual(FinalList, Out),
+    ?assertEqual(msg_state("hello"), FSM),
+    ok.
+
+case6() ->
+    SampleList = [
+        "INFO hello",
+        "some text",
+        "DEBUG fff",
+        "hello",
+        "world",
+        eof
+    ],
+
+    FinalList = [
+        "INFO hello",
+        "some text",
+        "DEBUG fff",
+        "hello",
+        "world"
     ],
 
     {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
