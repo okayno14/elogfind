@@ -18,7 +18,6 @@
 %% TODO подумать над логикой парсинга ключей и генерации аргсов. Думаю, что лучше завести разные типы опций
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO Удалить ListOut
-%% TODO 1 file name, 1 LineTarget
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
 %% escript Entry point
 main(Argv) ->
@@ -81,15 +80,15 @@ parse_key([_H | T], Args) ->
 %%--------------------------------------------------------------------
 read_lines(Device, LineTarget) ->
     {_noprint, FSM} = fsm_begin("", LineTarget),
-	read_lines(Device, LineTarget, FSM).
+	read_lines_(Device, FSM).
 
-read_lines(Device, LineTarget, FSM) ->
+read_lines_(Device, FSM) ->
      case io:get_line(Device, "") of
 		eof ->
 			ok;
 
 		String ->
-            {Out, FSM2} = fsm_input(String, LineTarget, FSM),
+            {Out, FSM2} = fsm_input(String, FSM),
             case Out of
                 [{print, Msg}] ->
                     io:format("~ts", [Msg]);
@@ -97,7 +96,7 @@ read_lines(Device, LineTarget, FSM) ->
                 _noprint ->
                     ok
             end,
-			read_lines(Device, LineTarget, FSM2)
+			read_lines_(Device, FSM2)
     end.
 %%--------------------------------------------------------------------
 
@@ -105,9 +104,9 @@ read_lines(Device, LineTarget, FSM) ->
 read_lines_list_tester(LineList, LineTarget) ->
     Acc = [],
     {_noprint, FSM} = fsm_begin("", LineTarget),
-    read_lines_list_tester_(LineList, LineTarget, FSM, Acc).
+    read_lines_list_tester_(LineList, FSM, Acc).
 
-read_lines_list_tester_([], _LineTarget, FSM, Acc) ->
+read_lines_list_tester_([], FSM, Acc) ->
     F = fun
     (Arg = [H | _]) when is_list(H) ->
         Arg;
@@ -118,18 +117,18 @@ read_lines_list_tester_([], _LineTarget, FSM, Acc) ->
     end,
     {lists:flatmap(F, lists:reverse(Acc)), FSM};
 
-read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
-    {Out, FSM2} = fsm_input(H, LineTarget, FSM),
+read_lines_list_tester_([H | T], FSM, Acc) ->
+    {Out, FSM2} = fsm_input(H, FSM),
 
     case Out of
         [{print, [Msg]}] ->
-            read_lines_list_tester_(T, LineTarget, FSM2, [Msg | Acc]);
+            read_lines_list_tester_(T, FSM2, [Msg | Acc]);
 
         [{print, Msg}] ->
-            read_lines_list_tester_(T, LineTarget, FSM2, [Msg | Acc]);
+            read_lines_list_tester_(T, FSM2, [Msg | Acc]);
 
         _noprint ->
-            read_lines_list_tester_(T, LineTarget, FSM2, Acc)
+            read_lines_list_tester_(T, FSM2, Acc)
     end.
 %%--------------------------------------------------------------------
 
@@ -140,14 +139,21 @@ read_lines_list_tester_([H | T], LineTarget, FSM, Acc) ->
 -record(msg_state, {
     print :: print | noprint,
     last :: last | nolast,
+    line_target :: string(),
     msg_acc :: list(string()),
     log_begins_re :: list()
 }).
 
-msg_state() ->
+msg_state(LineTarget) ->
     MakeReFun = fun(X) -> {ok, MP} = re:compile(X, [caseless]), MP end,
     LogBeginsRe = [MakeReFun(LogLevelLabel) || LogLevelLabel <- ?LOG_LEVEL_LABEL_LIST],
-    #msg_state{print = noprint, last = nolast, msg_acc = [], log_begins_re = LogBeginsRe}.
+    #msg_state{
+        print = noprint,
+        last = nolast,
+        line_target = LineTarget,
+        msg_acc = [],
+        log_begins_re = LogBeginsRe
+    }.
 
 clean_msg_state(MsgState) ->
     MsgState#msg_state{print = noprint, last = nolast, msg_acc = []}.
@@ -168,16 +174,16 @@ print_msg_state(MsgState) ->
     fsm_res().
 %%--------------------------------------------------------------------
 fsm_begin(Line, LineTarget) ->
-    fsm({input, Line}, LineTarget, msg_state(), []).
+    fsm({input, Line}, msg_state(LineTarget), []).
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
 %% @doc
--spec fsm_input(Line :: line_input(), LineTarget :: string(), MsgState :: msg_state()) ->
+-spec fsm_input(Line :: line_input(), MsgState :: msg_state()) ->
     fsm_res().
 %%--------------------------------------------------------------------
-fsm_input(Line, LineTarget, MsgState) ->
-    fsm({input, Line}, LineTarget, MsgState, []).
+fsm_input(Line, MsgState) ->
+    fsm({input, Line}, MsgState, []).
 %%--------------------------------------------------------------------
 
 -type msg_state() :: #msg_state{}.
@@ -195,7 +201,6 @@ fsm_input(Line, LineTarget, MsgState) ->
         {input, Line :: line_input()} |
         {check, Line :: line_input()} |
         {out, Line :: line_input()},
-    LineTarget :: string(),
     MsgState :: msg_state(),
     ListOut :: [out()]
 ) ->
@@ -204,37 +209,38 @@ fsm_input(Line, LineTarget, MsgState) ->
 %% Добавить Line в MsgAcc, сменить или оставить nolast
 %% init
 
-fsm(Input = {input, eof}, LineTarget, MsgState = #msg_state{last = nolast}, ListOut) ->
+fsm(Input = {input, eof}, MsgState = #msg_state{last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    fsm({out, eof}, LineTarget, MsgState#msg_state{last = last}, ListOut);
+    fsm({out, eof}, MsgState#msg_state{last = last}, ListOut);
 
-fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = []}, ListOut = []) ->
+fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = []}, ListOut = []) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
-            fsm({check, Line}, LineTarget, MsgState#msg_state{msg_acc = [Line]}, ListOut);
+            fsm({check, Line}, MsgState#msg_state{msg_acc = [Line]}, ListOut);
 
         false ->
-            fsm({out, Line}, LineTarget, MsgState#msg_state{last = last, msg_acc = [Line]}, ListOut)
+            fsm({out, Line}, MsgState#msg_state{last = last, msg_acc = [Line]}, ListOut)
     end;
 
-fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = MsgAcc}, ListOut) ->
+%% TODO убрать из головы функции вытаскивание MsgAcc
+fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = MsgAcc}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
             %% отбрасываем аккумулятор старого сообщения (потому что noprint), начинаем копить новое
             MsgStateNew = clean_msg_state(MsgState),
-            fsm({check, Line}, LineTarget, MsgStateNew#msg_state{msg_acc = [Line]}, ListOut);
+            fsm({check, Line}, MsgStateNew#msg_state{msg_acc = [Line]}, ListOut);
 
         false ->
-            fsm({check, Line}, LineTarget, MsgState#msg_state{msg_acc = [Line | MsgAcc]}, ListOut)
+            fsm({check, Line}, MsgState#msg_state{msg_acc = [Line | MsgAcc]}, ListOut)
     end;
 
-fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = print, last = nolast, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {input, Line}, MsgState = #msg_state{print = print, last = nolast, msg_acc = MsgAcc}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
-            fsm({out, Line}, LineTarget, MsgState#msg_state{last = last}, ListOut);
+            fsm({out, Line}, MsgState#msg_state{last = last}, ListOut);
 
         %% TODO переделать на переход в out
         false ->
@@ -244,9 +250,9 @@ fsm(Input = {input, Line}, LineTarget, MsgState = #msg_state{print = print, last
 
 %% TODO переделать на переход в out
 %% Сменить или оставить noprint
-fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
+fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    case match_target(Line, LineTarget) of
+    case match_target(Line, MsgState#msg_state.line_target) of
         true ->
             {lists:reverse(ListOut), MsgState#msg_state{print = print}};
 
@@ -254,37 +260,37 @@ fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, la
             {lists:reverse(ListOut), MsgState}
     end;
 
-fsm(Input = {check, Line}, LineTarget, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
+fsm(Input = {check, Line}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    case match_target(Line, LineTarget) of
+    case match_target(Line, MsgState#msg_state.line_target) of
         true ->
-            fsm({out, Line}, LineTarget, MsgState#msg_state{print = print}, ListOut);
+            fsm({out, Line}, MsgState#msg_state{print = print}, ListOut);
 
         false ->
-            fsm({out, Line}, LineTarget, MsgState, ListOut)
+            fsm({out, Line}, MsgState, ListOut)
     end;
 %%--------------------------------------------------------------------
 
 %% pre last
-fsm(Input = {out, eof}, _LineTarget, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
+fsm(Input = {out, eof}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
-fsm(Input = {out, eof}, _LineTarget, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {out, eof}, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
     {ListOut2, clean_msg_state(MsgState)};
 
 %% bad path - дропнуть MsgAcc, дропнуть Line, выйти в receive
-fsm(Input = {out, _Line}, _LineTarget, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
+fsm(Input = {out, _Line}, MsgState = #msg_state{print = noprint, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
 %% good path - переложить MsgAcc в ListOut, переложить Line в input
-fsm(Input = {out, Line}, LineTarget, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {out, Line}, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
-    fsm({input, Line}, LineTarget, clean_msg_state(MsgState), ListOut2).
+    fsm({input, Line}, clean_msg_state(MsgState), ListOut2).
 %%--------------------------------------------------------------------
 
 log_begins(LogBeginsRe, Line) ->
@@ -351,7 +357,7 @@ case1() ->
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
-    ?assertEqual(msg_state(), FSM),
+    ?assertEqual(msg_state("hello"), FSM),
     ok.
 
 case2() ->
@@ -372,7 +378,7 @@ case2() ->
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
-    ?assertEqual(msg_state(), FSM),
+    ?assertEqual(msg_state("hello"), FSM),
     ok.
 
 case3() ->
@@ -389,7 +395,7 @@ case3() ->
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
-    ?assertEqual(msg_state(), FSM),
+    ?assertEqual(msg_state("hello"), FSM),
     ok.
 
 case4() ->
@@ -408,7 +414,7 @@ case4() ->
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
-    ?assertEqual(msg_state(), FSM),
+    ?assertEqual(msg_state("hello"), FSM),
     ok.
 
 case5() ->
@@ -428,6 +434,6 @@ case5() ->
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
-    ?assertEqual(msg_state(), FSM),
+    ?assertEqual(msg_state("hello"), FSM),
     ok.
 
