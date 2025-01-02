@@ -19,6 +19,7 @@
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO Удалить ListOut
 %% TODO 1 file name, 1 LineTarget
+%% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
 %% escript Entry point
 main(Argv) ->
     Args = parse_args(Argv, #args{}),
@@ -35,7 +36,7 @@ main(Argv) ->
 
         %% значит, что-то прочитали
         true ->
-            read_stdin_lines(Args#args.line_target);
+            read_lines(standard_io, Args#args.line_target);
 
         _false ->
             ok
@@ -73,14 +74,6 @@ parse_key([_H | T], Args) ->
 %%====================================================================
 %% fsm_stdout
 %%====================================================================
-
-%%--------------------------------------------------------------------
--spec read_stdin_lines(LineTarget :: string()) ->
-    [] | string().
-%%--------------------------------------------------------------------
-read_stdin_lines(LineTarget) ->
-	read_lines(standard_io, LineTarget).
-%%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
 -spec read_lines(Device :: io:device(), LineTarget :: string()) ->
