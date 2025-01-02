@@ -223,8 +223,7 @@ fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast,
             fsm({out, Line}, MsgState#msg_state{last = last, msg_acc = [Line]}, ListOut)
     end;
 
-%% TODO убрать из головы функции вытаскивание MsgAcc
-fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
@@ -233,10 +232,10 @@ fsm(Input = {input, Line}, MsgState = #msg_state{print = noprint, last = nolast,
             fsm({check, Line}, MsgStateNew#msg_state{msg_acc = [Line]}, ListOut);
 
         false ->
-            fsm({check, Line}, MsgState#msg_state{msg_acc = [Line | MsgAcc]}, ListOut)
+            fsm({check, Line}, MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}, ListOut)
     end;
 
-fsm(Input = {input, Line}, MsgState = #msg_state{print = print, last = nolast, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {input, Line}, MsgState = #msg_state{print = print, last = nolast}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     case log_begins(MsgState#msg_state.log_begins_re, Line) of
         true ->
@@ -244,7 +243,7 @@ fsm(Input = {input, Line}, MsgState = #msg_state{print = print, last = nolast, m
 
         %% TODO переделать на переход в out
         false ->
-            {lists:reverse(ListOut), MsgState#msg_state{msg_acc = [Line | MsgAcc]}}
+            {lists:reverse(ListOut), MsgState#msg_state{msg_acc = [Line | MsgState#msg_state.msg_acc]}}
     end;
 %%--------------------------------------------------------------------
 
@@ -276,9 +275,9 @@ fsm(Input = {out, eof}, MsgState = #msg_state{print = noprint, last = last}, Lis
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
     {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
-fsm(Input = {out, eof}, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {out, eof}, MsgState = #msg_state{print = print, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
+    ListOut2 = [{print, lists:reverse(MsgState#msg_state.msg_acc)} | ListOut],
     {ListOut2, clean_msg_state(MsgState)};
 
 %% bad path - дропнуть MsgAcc, дропнуть Line, выйти в receive
@@ -287,9 +286,9 @@ fsm(Input = {out, _Line}, MsgState = #msg_state{print = noprint, last = last}, L
     {lists:reverse([noprint | ListOut]), clean_msg_state(MsgState)};
 
 %% good path - переложить MsgAcc в ListOut, переложить Line в input
-fsm(Input = {out, Line}, MsgState = #msg_state{print = print, last = last, msg_acc = MsgAcc}, ListOut) ->
+fsm(Input = {out, Line}, MsgState = #msg_state{print = print, last = last}, ListOut) ->
     ?LOG_DEBUG("Input:~p MsgState:~ts", [Input, print_msg_state(MsgState)]),
-    ListOut2 = [{print, lists:reverse(MsgAcc)} | ListOut],
+    ListOut2 = [{print, lists:reverse(MsgState#msg_state.msg_acc)} | ListOut],
     fsm({input, Line}, clean_msg_state(MsgState), ListOut2).
 %%--------------------------------------------------------------------
 
