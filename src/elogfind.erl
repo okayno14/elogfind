@@ -16,10 +16,12 @@
 %% View
 %%====================================================================
 
-%% TODO добавить спеки ко всем функциям.
 %% TODO подумать, надо ли перетаскивать тестовый клиент в другое место?
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
+%%--------------------------------------------------------------------
+-spec main(Argv :: [string()]) ->
+    non_neg_integer().
 %%--------------------------------------------------------------------
 main(Argv) ->
     Status =
@@ -44,6 +46,9 @@ main(Argv) ->
     end.
 %%--------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+-spec read_from_file(ArgsFile :: #args_file{}) ->
+    ok | {error, Reason :: string()}.
 %%--------------------------------------------------------------------
 read_from_file(ArgsFile) ->
     case file:open(ArgsFile#args_file.file, [read]) of
@@ -204,6 +209,9 @@ read_lines_(Device, FSM) ->
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
+-spec read_lines_list_tester(LineList :: [string()], LineTarget :: string()) ->
+    {Out :: [string()], FSM :: msg_state()}.
+%%--------------------------------------------------------------------
 read_lines_list_tester(LineList, LineTarget) ->
     Acc = [],
     {_noprint, FSM} = fsm_begin("", LineTarget),
@@ -247,6 +255,11 @@ read_lines_list_tester_([H | T], FSM, Acc) ->
     log_begins_re :: list()
 }).
 
+%%--------------------------------------------------------------------
+%% @doc
+-spec msg_state(LineTarget :: string()) ->
+    msg_state().
+%%--------------------------------------------------------------------
 msg_state(LineTarget) ->
     MakeReFun = fun(X) -> {ok, MP} = re:compile(X, [caseless]), MP end,
     LogBeginsRe = [MakeReFun(LogLevelLabel) || LogLevelLabel <- ?LOG_LEVEL_LABEL_LIST],
@@ -257,10 +270,22 @@ msg_state(LineTarget) ->
         msg_acc = [],
         log_begins_re = LogBeginsRe
     }.
+%%--------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+%% @doc
+-spec clean_msg_state(MsgState :: msg_state()) ->
+    MsgState2 :: msg_state().
+%%--------------------------------------------------------------------
 clean_msg_state(MsgState) ->
     MsgState#msg_state{print = noprint, last = nolast, msg_acc = []}.
+%%--------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+%% @doc
+-spec print_msg_state(MsgState :: msg_state()) ->
+    string().
+%%--------------------------------------------------------------------
 print_msg_state(MsgState) ->
     PropList =
     lists:keydelete(log_begins_re, 1,
@@ -270,6 +295,7 @@ print_msg_state(MsgState) ->
         )
     ),
     io_lib:format("~0tp", [PropList]).
+%%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
 %% @doc
