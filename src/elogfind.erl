@@ -16,7 +16,6 @@
 %% View
 %%====================================================================
 
-%% TODO подумать, надо ли перетаскивать тестовый клиент в другое место?
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
 %%--------------------------------------------------------------------
@@ -27,10 +26,10 @@ main(Argv) ->
     Status =
     case parse_argv(Argv) of
         ArgsSTDIN = #args_stdin{} ->
-            read_lines(standard_io, ArgsSTDIN#args_stdin.line_target);
+            run_fsm_io(standard_io, ArgsSTDIN#args_stdin.line_target);
 
         ArgsFile = #args_file{} ->
-            read_from_file(ArgsFile);
+            run_fsm_file_stdout(ArgsFile);
 
         {error, not_found} ->
             {error, "Invalid Args"}
@@ -47,13 +46,13 @@ main(Argv) ->
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
--spec read_from_file(ArgsFile :: #args_file{}) ->
+-spec run_fsm_file_stdout(ArgsFile :: #args_file{}) ->
     ok | {error, Reason :: string()}.
 %%--------------------------------------------------------------------
-read_from_file(ArgsFile) ->
+run_fsm_file_stdout(ArgsFile) ->
     case file:open(ArgsFile#args_file.file, [read]) of
         {ok, IoDevice} ->
-            read_lines(IoDevice, ArgsFile#args_file.line_target);
+            run_fsm_io(IoDevice, ArgsFile#args_file.line_target);
 
         {error, Reason} ->
             {error, io_lib:format("Failed to open file ~p by Reason:~p", [ArgsFile#args_file.file, Reason])}
@@ -179,18 +178,18 @@ parse_key(Key, Argv) ->
 %%--------------------------------------------------------------------
 
 %%====================================================================
-%% fsm_stdout
+%% fsm_runners
 %%====================================================================
 
 %%--------------------------------------------------------------------
--spec read_lines(Device :: io:device(), LineTarget :: string()) ->
+-spec run_fsm_io(Device :: io:device(), LineTarget :: string()) ->
     ok.
 %%--------------------------------------------------------------------
-read_lines(Device, LineTarget) ->
+run_fsm_io(Device, LineTarget) ->
     {_noprint, FSM} = fsm_begin("", LineTarget),
-	read_lines_(Device, FSM).
+	run_fsm_io_(Device, FSM).
 
-read_lines_(Device, FSM) ->
+run_fsm_io_(Device, FSM) ->
      case io:get_line(Device, "") of
 		eof ->
 			ok;
@@ -204,20 +203,20 @@ read_lines_(Device, FSM) ->
                 _noprint ->
                     ok
             end,
-			read_lines_(Device, FSM2)
+			run_fsm_io_(Device, FSM2)
     end.
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
--spec read_lines_list_tester(LineList :: [string()], LineTarget :: string()) ->
+-spec run_fsm_string_list(LineList :: [string()], LineTarget :: string()) ->
     {Out :: [string()], FSM :: msg_state()}.
 %%--------------------------------------------------------------------
-read_lines_list_tester(LineList, LineTarget) ->
+run_fsm_string_list(LineList, LineTarget) ->
     Acc = [],
     {_noprint, FSM} = fsm_begin("", LineTarget),
-    read_lines_list_tester_(LineList, FSM, Acc).
+    run_fsm_string_list_(LineList, FSM, Acc).
 
-read_lines_list_tester_([], FSM, Acc) ->
+run_fsm_string_list_([], FSM, Acc) ->
     F = fun
     (Arg = [H | _]) when is_list(H) ->
         Arg;
@@ -228,18 +227,18 @@ read_lines_list_tester_([], FSM, Acc) ->
     end,
     {lists:flatmap(F, lists:reverse(Acc)), FSM};
 
-read_lines_list_tester_([H | T], FSM, Acc) ->
+run_fsm_string_list_([H | T], FSM, Acc) ->
     {Out, FSM2} = fsm_input(H, FSM),
 
     case Out of
         [{print, [Msg]}] ->
-            read_lines_list_tester_(T, FSM2, [Msg | Acc]);
+            run_fsm_string_list_(T, FSM2, [Msg | Acc]);
 
         [{print, Msg}] ->
-            read_lines_list_tester_(T, FSM2, [Msg | Acc]);
+            run_fsm_string_list_(T, FSM2, [Msg | Acc]);
 
         _noprint ->
-            read_lines_list_tester_(T, FSM2, Acc)
+            run_fsm_string_list_(T, FSM2, Acc)
     end.
 %%--------------------------------------------------------------------
 
@@ -549,7 +548,7 @@ case1() ->
         "hello text"
     ],
 
-    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
@@ -570,7 +569,7 @@ case2() ->
         "WARNING hello"
     ],
 
-    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
@@ -587,7 +586,7 @@ case3() ->
         "WARNING hello"
     ],
 
-    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
@@ -606,7 +605,7 @@ case4() ->
         "WARNING hello"
     ],
 
-    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
@@ -626,7 +625,7 @@ case5() ->
         "some text"
     ],
 
-    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
@@ -651,7 +650,7 @@ case6() ->
         "world"
     ],
 
-    {Out, FSM} = read_lines_list_tester(SampleList, "hello"),
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
     ?LOG_DEBUG("=======", []),
 
     ?assertEqual(FinalList, Out),
