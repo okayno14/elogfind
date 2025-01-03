@@ -9,65 +9,141 @@
     "ERROR", "WARN", "INFO", "TRACE", "DEBUG"
 ]).
 
--record(args, {line_target :: string(), file :: string()}).
+-record(args_file, {line_target :: string(), file :: string()}).
+-record(args_stdin, {line_target :: string()}).
 
 %%====================================================================
 %% View
 %%====================================================================
 
-%% TODO подумать над логикой парсинга ключей и генерации аргсов. Думаю, что лучше завести разные типы опций
+%% TODO добавить спеки ко всем функциям.
+%% TODO подумать, надо ли перетаскивать тестовый клиент в другое место?
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
-%% escript Entry point
 main(Argv) ->
-    Args = parse_args(Argv, #args{}),
-    case Args =/= #args{} of
-        true when Args#args.file =/= undefined ->
-            case file:open(Args#args.file, [read]) of
-                {ok, IoDevice} ->
-                    read_lines(IoDevice, Args#args.line_target);
+    Status =
+    case parse_argv(Argv) of
+        ArgsSTDIN = #args_stdin{} ->
+            read_lines(standard_io, ArgsSTDIN#args_stdin.line_target);
 
-                {error, Reason} ->
-                    io:format(standard_error, "Failed to open file ~p by Reason:~p", [Args#args.file, Reason]),
-                    halt(1)
-            end;
+        ArgsFile = #args_file{} ->
+            read_from_file(ArgsFile);
 
-        %% значит, что-то прочитали
+        {error, not_found} ->
+            {error, "Invalid Args"}
+    end,
+
+    case Status of
+        {error, Reason} ->
+            io:format(standard_error, "Failed by reason:~ts~n", [Reason]),
+            1;
+
+        _ok ->
+            0
+    end.
+
+read_from_file(ArgsFile) ->
+    case file:open(ArgsFile#args_file.file, [read]) of
+        {ok, IoDevice} ->
+            read_lines(IoDevice, ArgsFile#args_file.line_target);
+
+        {error, Reason} ->
+            {error, io_lib:format("Failed to open file ~p by Reason:~p", [ArgsFile#args_file.file, Reason])}
+    end.
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec parse_argv(Argv :: [string()]) ->
+    #args_stdin{} | #args_file{} | {error, not_found}.
+%%--------------------------------------------------------------------
+parse_argv(Argv) ->
+    F =
+    fun(Key, ArgMapAcc) ->
+        case parse_key(Key, Argv) of
+            {ok, Value} ->
+                ArgMapAcc#{Key => Value};
+
+            {error, not_found} ->
+                ArgMapAcc
+        end
+    end,
+
+    ArgMap =
+    lists:foldl(F, #{}, ["-f", "-sep"]),
+
+    case maps:is_key("-f", ArgMap) of
         true ->
-            read_lines(standard_io, Args#args.line_target);
+            args_file(ArgMap);
 
         _false ->
-            ok
-    end,
-    erlang:halt(0).
+            args_stdin(ArgMap)
+    end.
+%%--------------------------------------------------------------------
 
-parse_args([], Args) ->
-    Args;
+%% TODO вот тут неплохо бы смотрелась Validation-монада: я бы прошёлся по всем требуемым аргументам
+%% и выписал юзеру все ошибки
+%%--------------------------------------------------------------------
+%% @doc
+-spec args_file(ArgMap :: map()) ->
+    #args_file{} | {error, not_found}.
+%%--------------------------------------------------------------------
+args_file(ArgMap) ->
+    run_pipe([
+        fun(ArgsFileAcc) ->
+            case maps:get("-f", ArgMap, not_found) of
+                not_found ->
+                    {error, not_found};
 
-parse_args(Argv, Args) ->
-    {Argv2, Args2} = parse_key(Argv, Args),
-    parse_args(Argv2, Args2).
+                File ->
+                    ArgsFileAcc#args_file{file = File}
+            end
+        end,
+        fun(ArgsFileAcc) ->
+            case maps:get("-sep", ArgMap, not_found) of
+                not_found ->
+                    {error, not_found};
 
-parse_key(["-sep" | T], Args) ->
-    case T of
-        [LineTarget | T2] ->
-            {T2, Args#args{line_target = LineTarget}};
+                LineTarget ->
+                    ArgsFileAcc#args_file{line_target = LineTarget}
+            end
+        end
+    ], #args_file{}).
+%%--------------------------------------------------------------------
 
-        _ ->
-            {T, Args}
-    end;
+%%--------------------------------------------------------------------
+%% @doc
+-spec args_stdin(ArgMap :: map()) ->
+    #args_stdin{} | {error, not_found}.
+%%--------------------------------------------------------------------
+args_stdin(ArgMap) ->
+    run_pipe([
+        fun(ArgsSTDINAcc) ->
+            case maps:get("-sep", ArgMap, not_found) of
+                not_found ->
+                    {error, not_found};
 
-parse_key(["-f" | T], Args) ->
-    case T of
-        [File | T2] ->
-            {T2, Args#args{file = File}};
+                LineTarget ->
+                    ArgsSTDINAcc#args_stdin{line_target = LineTarget}
+            end
+        end
+    ], #args_stdin{}).
+%%--------------------------------------------------------------------
 
-        _ ->
-            {T, Args}
-    end;
+%%--------------------------------------------------------------------
+%% @doc
+-spec parse_key(Key :: string(), Argv :: [string()]) ->
+    {ok, Value :: string()} | {error, not_found}.
+%%--------------------------------------------------------------------
+parse_key(Key, Argv) ->
+    Pred = fun(E) when E =/= Key -> true; (_E) -> false end,
+    case nth(2, lists:dropwhile(Pred, Argv)) of
+        [] ->
+            {error, not_found};
 
-parse_key([_H | T], Args) ->
-    {T, Args}.
+        Value ->
+            {ok, Value}
+    end.
+%%--------------------------------------------------------------------
 
 %%====================================================================
 %% fsm_stdout
@@ -75,7 +151,7 @@ parse_key([_H | T], Args) ->
 
 %%--------------------------------------------------------------------
 -spec read_lines(Device :: io:device(), LineTarget :: string()) ->
-    [] | string().
+    ok.
 %%--------------------------------------------------------------------
 read_lines(Device, LineTarget) ->
     {_noprint, FSM} = fsm_begin("", LineTarget),
@@ -318,6 +394,78 @@ match_target(Line, LineTarget) ->
 
         _ ->
             true
+    end.
+%%--------------------------------------------------------------------
+
+%%%===================================================================
+%%% utils
+%%%===================================================================
+
+nth(_N, []) -> [];
+nth(1, [H|_]) -> H;
+nth(N, [_|T]) when N > 1 ->
+    nth(N - 1, T).
+
+%% Начальное значение аккумулятора для pipe/compose
+-type acc0() :: fun(() -> result()) | term().
+
+%% Конечный результат композиции
+-type result() :: {_Result, {error, _Reason}} | {error, _Reason} | error | _Result.
+
+%% Результат функций, собираемых в композицию
+-type funlist2() :: [fun((_Acc) -> result2())].
+-type result2() :: {dive, funlist2()} | {dive, _Acc, funlist2()} | result().
+%%--------------------------------------------------------------------
+%% @doc
+%% <pre>
+%% Пропускает значение по конвейеру функций.
+%% FunList - список анонимных функций, по которым будет пропущен аккумулятор.
+%%           Если одна из функций вернёт {error, _Reason}, то произойдёт остановка конвейера.
+%%           Если одна из функций вернёт {dive, FunList}, то
+%%           FunList будет положен в начало оставшегося конвейера (безопасно для стека вызовов).
+%% AccFun - функция, возвращающая начальное значение; либо уже заранее определённый аккумулятор
+%% pre:
+%%   Функции из FunList не должны генерировать исключения
+%% </pre>
+%% @end
+-spec run_pipe(FunList :: funlist2(), AccFun :: acc0()) ->
+    result().
+%%--------------------------------------------------------------------
+run_pipe(FunList, AccFun) when is_function(AccFun) ->
+    run_pipe_([[fun(_) -> AccFun() end | FunList]], undefined);
+
+run_pipe(FunList, Acc) ->
+    run_pipe_([FunList], Acc).
+
+run_pipe_([], Acc) ->
+    Acc;
+
+run_pipe_([[] | T], Acc) ->
+    run_pipe_(T, Acc);
+
+run_pipe_([H | T], Acc) ->
+     [H2 | T2] = H,
+     case H2(Acc) of
+        ResultErr = {_Result, {error, _Reason}} ->
+            ResultErr;
+
+        ResultErr = {error, _Reason} ->
+            ResultErr;
+
+        ResultErr = error ->
+            ResultErr;
+
+        {dive, L2} ->
+            L3 = [L2] ++ [T2 | T],
+            run_pipe_(L3, Acc);
+
+        {dive, Acc2, L2} ->
+            L3 = [L2] ++ [T2 | T],
+            run_pipe_(L3, Acc2);
+
+        Acc2 ->
+            L2 = [T2 | T],
+            run_pipe_(L2, Acc2)
     end.
 %%--------------------------------------------------------------------
 
