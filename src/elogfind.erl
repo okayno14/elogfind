@@ -11,15 +11,16 @@
 
 -record(args_file, {line_target :: string(), file :: string()}).
 -record(args_stdin, {line_target :: string()}).
+-record(args_help, {}).
 
 -define(F_ARG, "-f").
 -define(STR_ARG, "-str").
+-define(HELP_ARG, "--help").
 
 %%====================================================================
 %% View
 %%====================================================================
 
-%% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
 %%--------------------------------------------------------------------
 -spec main(Argv :: [string()]) ->
     non_neg_integer().
@@ -32,6 +33,9 @@ main(Argv) ->
 
         ArgsFile = #args_file{} ->
             run_fsm_file_stdout(ArgsFile);
+
+        #args_help{} ->
+            print_help();
 
         {error, not_found} ->
             {error, "Invalid Args"}
@@ -61,6 +65,23 @@ run_fsm_file_stdout(ArgsFile) ->
     end.
 %%--------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
+%% @doc
+-spec print_help() ->
+    ok.
+%%--------------------------------------------------------------------
+print_help() ->
+    Str =
+    "Filter log-messages by string match.\n"
+    "By default reads data from STDIN. This method NOT RECOMMENDED for big logs.\n"
+    "Args:\n" ++
+    io_lib:format("    ~ts <String> match <String> for log-message~n", [?STR_ARG]) ++
+    io_lib:format("    ~ts <File> read data from <File>~n", [?F_ARG]) ++
+    io_lib:format("    ~ts - print this message~n", [?HELP_ARG]),
+
+    io:format("~ts", [Str]).
+%%--------------------------------------------------------------------
+
 %% TODO тут неплохо использовать Validation-монаду: проверка правильности ключей
 %%--------------------------------------------------------------------
 %% @doc
@@ -82,16 +103,37 @@ parse_argv(Argv) ->
         end
     end,
 
+    NoValueFun =
+    fun(ArgMapAcc, Key) ->
+        case parse_key(Key, Argv) of
+            {ok, Value} ->
+                ArgMapAcc#{Key => Value};
+
+            {error, key_not_found} ->
+                ArgMapAcc;
+
+            {error, value_not_found} ->
+                ArgMapAcc#{Key => []}
+        end
+    end,
+
     run_pipe([
         fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?F_ARG) end,
         fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?STR_ARG) end,
+        fun(ArgMapAcc) -> NoValueFun(ArgMapAcc, ?HELP_ARG) end,
         fun(ArgMapAcc) ->
-            case maps:is_key(?F_ARG, ArgMapAcc) of
+            case maps:is_key(?HELP_ARG, ArgMapAcc) of
                 true ->
-                    args_file(ArgMapAcc);
+                    #args_help{};
 
-                _false ->
-                    args_stdin(ArgMapAcc)
+                false ->
+                    case maps:is_key(?F_ARG, ArgMapAcc) of
+                        true ->
+                            args_file(ArgMapAcc);
+
+                        _false ->
+                            args_stdin(ArgMapAcc)
+                    end
             end
         end
     ], #{}).
