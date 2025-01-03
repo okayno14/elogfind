@@ -20,6 +20,7 @@
 %% TODO подумать, надо ли перетаскивать тестовый клиент в другое место?
 %% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
+%%--------------------------------------------------------------------
 main(Argv) ->
     Status =
     case parse_argv(Argv) of
@@ -35,13 +36,15 @@ main(Argv) ->
 
     case Status of
         {error, Reason} ->
-            io:format(standard_error, "Failed by reason:~ts~n", [Reason]),
+            io:format(standard_error, "Failed by reason: ~ts~n", [Reason]),
             1;
 
         _ok ->
             0
     end.
+%%--------------------------------------------------------------------
 
+%%--------------------------------------------------------------------
 read_from_file(ArgsFile) ->
     case file:open(ArgsFile#args_file.file, [read]) of
         {ok, IoDevice} ->
@@ -50,38 +53,45 @@ read_from_file(ArgsFile) ->
         {error, Reason} ->
             {error, io_lib:format("Failed to open file ~p by Reason:~p", [ArgsFile#args_file.file, Reason])}
     end.
+%%--------------------------------------------------------------------
 
+%% TODO тут неплохо использовать Validation-монаду: проверка правильности ключей
 %%--------------------------------------------------------------------
 %% @doc
 -spec parse_argv(Argv :: [string()]) ->
     #args_stdin{} | #args_file{} | {error, not_found}.
 %%--------------------------------------------------------------------
 parse_argv(Argv) ->
-    F =
-    fun(Key, ArgMapAcc) ->
+    WithValueFun =
+    fun(ArgMapAcc, Key) ->
         case parse_key(Key, Argv) of
             {ok, Value} ->
                 ArgMapAcc#{Key => Value};
 
-            {error, not_found} ->
-                ArgMapAcc
+            {error, key_not_found} ->
+                ArgMapAcc;
+
+            {error, value_not_found} ->
+                {error, not_found}
         end
     end,
 
-    ArgMap =
-    lists:foldl(F, #{}, ["-f", "-sep"]),
+    run_pipe([
+        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, "-f") end,
+        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, "-sep") end,
+        fun(ArgMapAcc) ->
+            case maps:is_key("-f", ArgMapAcc) of
+                true ->
+                    args_file(ArgMapAcc);
 
-    case maps:is_key("-f", ArgMap) of
-        true ->
-            args_file(ArgMap);
-
-        _false ->
-            args_stdin(ArgMap)
-    end.
+                _false ->
+                    args_stdin(ArgMapAcc)
+            end
+        end
+    ], #{}).
 %%--------------------------------------------------------------------
 
-%% TODO вот тут неплохо бы смотрелась Validation-монада: я бы прошёлся по всем требуемым аргументам
-%% и выписал юзеру все ошибки
+%% TODO вот тут неплохо бы смотрелась Validation-монада: проверка наличия ключей
 %%--------------------------------------------------------------------
 %% @doc
 -spec args_file(ArgMap :: map()) ->
@@ -132,17 +142,35 @@ args_stdin(ArgMap) ->
 %%--------------------------------------------------------------------
 %% @doc
 -spec parse_key(Key :: string(), Argv :: [string()]) ->
-    {ok, Value :: string()} | {error, not_found}.
+    {ok, Value :: string()} | {error, key_not_found | value_not_found}.
 %%--------------------------------------------------------------------
 parse_key(Key, Argv) ->
     Pred = fun(E) when E =/= Key -> true; (_E) -> false end,
-    case nth(2, lists:dropwhile(Pred, Argv)) of
-        [] ->
-            {error, not_found};
+    run_pipe([
+        fun(ArgvAcc) ->
+            case lists:dropwhile(Pred, ArgvAcc) of
+                [] ->
+                    {error, key_not_found};
 
-        Value ->
-            {ok, Value}
-    end.
+                ArgvAcc2 ->
+                    ArgvAcc2
+            end
+        end,
+        fun(ArgvAcc) ->
+            case nth(2, ArgvAcc) of
+                %% Следующий элемент - ключ, надо вернуть ошибку
+                [$- | _] ->
+                    {error, value_not_found};
+
+                [] ->
+                    {error, value_not_found};
+
+                Elem ->
+                    {ok, Elem}
+            end
+
+        end
+    ], Argv).
 %%--------------------------------------------------------------------
 
 %%====================================================================
