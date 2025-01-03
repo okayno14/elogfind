@@ -12,11 +12,13 @@
 -record(args_file, {line_target :: string(), file :: string()}).
 -record(args_stdin, {line_target :: string()}).
 
+-define(F_ARG, "-f").
+-define(STR_ARG, "-str").
+
 %%====================================================================
 %% View
 %%====================================================================
 
-%% TODO переименовать -sep во что-то другое, т.к. семантически не очень красиво
 %% TODO добавить хелпу, предупредить, что чтение по stdin будет медленным
 %%--------------------------------------------------------------------
 -spec main(Argv :: [string()]) ->
@@ -81,10 +83,10 @@ parse_argv(Argv) ->
     end,
 
     run_pipe([
-        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, "-f") end,
-        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, "-sep") end,
+        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?F_ARG) end,
+        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?STR_ARG) end,
         fun(ArgMapAcc) ->
-            case maps:is_key("-f", ArgMapAcc) of
+            case maps:is_key(?F_ARG, ArgMapAcc) of
                 true ->
                     args_file(ArgMapAcc);
 
@@ -104,7 +106,7 @@ parse_argv(Argv) ->
 args_file(ArgMap) ->
     run_pipe([
         fun(ArgsFileAcc) ->
-            case maps:get("-f", ArgMap, not_found) of
+            case maps:get(?F_ARG, ArgMap, not_found) of
                 not_found ->
                     {error, not_found};
 
@@ -113,7 +115,7 @@ args_file(ArgMap) ->
             end
         end,
         fun(ArgsFileAcc) ->
-            case maps:get("-sep", ArgMap, not_found) of
+            case maps:get(?STR_ARG, ArgMap, not_found) of
                 not_found ->
                     {error, not_found};
 
@@ -132,7 +134,7 @@ args_file(ArgMap) ->
 args_stdin(ArgMap) ->
     run_pipe([
         fun(ArgsSTDINAcc) ->
-            case maps:get("-sep", ArgMap, not_found) of
+            case maps:get(?STR_ARG, ArgMap, not_found) of
                 not_found ->
                     {error, not_found};
 
