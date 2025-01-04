@@ -37,15 +37,14 @@ main(Argv) ->
         #args_help{} ->
             print_help();
 
-        %% TODO надо как-то более элегантно выводить инфу об ошибках
         ErrorStack ->
-            io:format(standard_error, "ErrorStack: ~p~n", [ErrorStack]),
-            ok
+            ErrorMsg = [[print_parse_error(ParseError), "\n"] || {error, ParseError} <- ErrorStack],
+            {error, ErrorMsg}
     end,
 
     case Status of
         {error, Reason} ->
-            io:format(standard_error, "Failed by reason: ~ts~n", [Reason]),
+            io:format(standard_error, "Failed by reason:~n~ts", [Reason]),
             1;
 
         _ok ->
@@ -63,7 +62,7 @@ run_fsm_file_stdout(ArgsFile) ->
             run_fsm_io(IoDevice, ArgsFile#args_file.line_target);
 
         {error, Reason} ->
-            {error, io_lib:format("Failed to open file ~p by Reason:~p", [ArgsFile#args_file.file, Reason])}
+            {error, io_lib:format("Failed to open file ~p by Reason:~p~n", [ArgsFile#args_file.file, Reason])}
     end.
 %%--------------------------------------------------------------------
 
@@ -74,17 +73,19 @@ run_fsm_file_stdout(ArgsFile) ->
 %%--------------------------------------------------------------------
 print_help() ->
     Str =
-    "Filter log-messages by string match.\n"
-    "By default reads data from STDIN. This method NOT RECOMMENDED for big logs.\n"
-    "Args:\n" ++
-    io_lib:format("    ~ts <String> match <String> for log-message~n", [?STR_ARG]) ++
-    io_lib:format("    ~ts <File> read data from <File>~n", [?F_ARG]) ++
-    io_lib:format("    ~ts - print this message~n", [?HELP_ARG]),
+    [
+        "Filter log-messages by string match.\n",
+        "By default reads data from STDIN. This method NOT RECOMMENDED for big logs.\n",
+        "Args:\n",
+        io_lib:format("    ~ts <String>: match <String> for log-message~n", [?STR_ARG]),
+        io_lib:format("    ~ts <File>: read data from <File>~n", [?F_ARG]),
+        io_lib:format("    ~ts: print this message~n", [?HELP_ARG])
+    ],
 
     io:format("~ts", [Str]).
 %%--------------------------------------------------------------------
 
--type parse_error() :: #{argument := Arg :: string(), reason := atom()}.
+-type parse_error() :: #{argument := Arg :: string(), reason := value_not_found | argument_not_present}.
 
 %% TODO подумать над названиями сущностей:
 %% Набор строк от юзера из шелла
@@ -276,6 +277,22 @@ check_key(ArgMapArg, KeyArg) ->
 %%--------------------------------------------------------------------
 parse_error(Arg, Reason) ->
     #{argument => Arg, reason => Reason}.
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec print_parse_error(ParseError :: parse_error()) ->
+    string().
+%%--------------------------------------------------------------------
+print_parse_error(ParseError) ->
+    #{argument := Arg, reason := Reason} = ParseError,
+    case Reason of
+        value_not_found ->
+            io_lib:format("Value for ~ts MUST be specified", [Arg]);
+
+        argument_not_present ->
+            io_lib:format("~ts MUST be present", [Arg])
+    end.
 %%--------------------------------------------------------------------
 
 %%====================================================================
