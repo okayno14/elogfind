@@ -117,7 +117,7 @@ parse_argv(Argv) ->
         end
     end,
 
-    run_pipe([
+    compose:run_pipe([
         fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?F_ARG) end,
         fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?STR_ARG) end,
         fun(ArgMapAcc) -> NoValueFun(ArgMapAcc, ?HELP_ARG) end,
@@ -146,7 +146,7 @@ parse_argv(Argv) ->
     #args_file{} | {error, not_found}.
 %%--------------------------------------------------------------------
 args_file(ArgMap) ->
-    run_pipe([
+    compose:run_pipe([
         fun(ArgsFileAcc) ->
             case maps:get(?F_ARG, ArgMap, not_found) of
                 not_found ->
@@ -174,7 +174,7 @@ args_file(ArgMap) ->
     #args_stdin{} | {error, not_found}.
 %%--------------------------------------------------------------------
 args_stdin(ArgMap) ->
-    run_pipe([
+    compose:run_pipe([
         fun(ArgsSTDINAcc) ->
             case maps:get(?STR_ARG, ArgMap, not_found) of
                 not_found ->
@@ -194,7 +194,7 @@ args_stdin(ArgMap) ->
 %%--------------------------------------------------------------------
 parse_key(Key, Argv) ->
     Pred = fun(E) when E =/= Key -> true; (_E) -> false end,
-    run_pipe([
+    compose:run_pipe([
         fun(ArgvAcc) ->
             case lists:dropwhile(Pred, ArgvAcc) of
                 [] ->
@@ -502,69 +502,6 @@ nth(_N, []) -> [];
 nth(1, [H|_]) -> H;
 nth(N, [_|T]) when N > 1 ->
     nth(N - 1, T).
-
-%% Начальное значение аккумулятора для pipe/compose
--type acc0() :: fun(() -> result()) | term().
-
-%% Конечный результат композиции
--type result() :: {_Result, {error, _Reason}} | {error, _Reason} | error | _Result.
-
-%% Результат функций, собираемых в композицию
--type funlist2() :: [fun((_Acc) -> result2())].
--type result2() :: {dive, funlist2()} | {dive, _Acc, funlist2()} | result().
-%%--------------------------------------------------------------------
-%% @doc
-%% <pre>
-%% Пропускает значение по конвейеру функций.
-%% FunList - список анонимных функций, по которым будет пропущен аккумулятор.
-%%           Если одна из функций вернёт {error, _Reason}, то произойдёт остановка конвейера.
-%%           Если одна из функций вернёт {dive, FunList}, то
-%%           FunList будет положен в начало оставшегося конвейера (безопасно для стека вызовов).
-%% AccFun - функция, возвращающая начальное значение; либо уже заранее определённый аккумулятор
-%% pre:
-%%   Функции из FunList не должны генерировать исключения
-%% </pre>
-%% @end
--spec run_pipe(FunList :: funlist2(), AccFun :: acc0()) ->
-    result().
-%%--------------------------------------------------------------------
-run_pipe(FunList, AccFun) when is_function(AccFun) ->
-    run_pipe_([[fun(_) -> AccFun() end | FunList]], undefined);
-
-run_pipe(FunList, Acc) ->
-    run_pipe_([FunList], Acc).
-
-run_pipe_([], Acc) ->
-    Acc;
-
-run_pipe_([[] | T], Acc) ->
-    run_pipe_(T, Acc);
-
-run_pipe_([H | T], Acc) ->
-     [H2 | T2] = H,
-     case H2(Acc) of
-        ResultErr = {_Result, {error, _Reason}} ->
-            ResultErr;
-
-        ResultErr = {error, _Reason} ->
-            ResultErr;
-
-        ResultErr = error ->
-            ResultErr;
-
-        {dive, L2} ->
-            L3 = [L2] ++ [T2 | T],
-            run_pipe_(L3, Acc);
-
-        {dive, Acc2, L2} ->
-            L3 = [L2] ++ [T2 | T],
-            run_pipe_(L3, Acc2);
-
-        Acc2 ->
-            L2 = [T2 | T],
-            run_pipe_(L2, Acc2)
-    end.
-%%--------------------------------------------------------------------
 
 %%%===================================================================
 %%% Test
