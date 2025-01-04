@@ -9,13 +9,13 @@
     "ERROR", "WARN", "INFO", "TRACE", "DEBUG"
 ]).
 
--record(args_file, {line_target :: string(), file :: string()}).
--record(args_stdin, {line_target :: string()}).
--record(args_help, {}).
+-record(cmd_file, {line_target :: string(), file :: string()}).
+-record(cmd_stdin, {line_target :: string()}).
+-record(cmd_help, {}).
 
--define(F_ARG, "-f").
--define(STR_ARG, "-str").
--define(HELP_ARG, "--help").
+-define(F_OPTION, "-f").
+-define(STR_OPTION, "-str").
+-define(HELP_OPTION, "--help").
 
 %%====================================================================
 %% View
@@ -28,13 +28,13 @@
 main(Argv) ->
     Status =
     case parse_argv(Argv) of
-        ArgsSTDIN = #args_stdin{} ->
-            run_fsm_io(standard_io, ArgsSTDIN#args_stdin.line_target);
+        CMDSTDIN = #cmd_stdin{} ->
+            run_fsm_io(standard_io, CMDSTDIN#cmd_stdin.line_target);
 
-        ArgsFile = #args_file{} ->
-            run_fsm_file_stdout(ArgsFile);
+        CMDFile = #cmd_file{} ->
+            run_fsm_file_stdout(CMDFile);
 
-        #args_help{} ->
+        #cmd_help{} ->
             print_help();
 
         ErrorStack ->
@@ -53,16 +53,16 @@ main(Argv) ->
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
--spec run_fsm_file_stdout(ArgsFile :: #args_file{}) ->
+-spec run_fsm_file_stdout(CMDFile :: #cmd_file{}) ->
     ok | {error, Reason :: string()}.
 %%--------------------------------------------------------------------
-run_fsm_file_stdout(ArgsFile) ->
-    case file:open(ArgsFile#args_file.file, [read]) of
+run_fsm_file_stdout(CMDFile) ->
+    case file:open(CMDFile#cmd_file.file, [read]) of
         {ok, IoDevice} ->
-            run_fsm_io(IoDevice, ArgsFile#args_file.line_target);
+            run_fsm_io(IoDevice, CMDFile#cmd_file.line_target);
 
         {error, Reason} ->
-            {error, io_lib:format("Failed to open file ~p by Reason:~p~n", [ArgsFile#args_file.file, Reason])}
+            {error, io_lib:format("Failed to open file ~p by Reason:~p~n", [CMDFile#cmd_file.file, Reason])}
     end.
 %%--------------------------------------------------------------------
 
@@ -77,34 +77,36 @@ print_help() ->
         "Filter log-messages by string match.\n",
         "By default reads data from STDIN. This method NOT RECOMMENDED for big logs.\n",
         "Args:\n",
-        io_lib:format("    ~ts <String>: match <String> for log-message~n", [?STR_ARG]),
-        io_lib:format("    ~ts <File>: read data from <File>~n", [?F_ARG]),
-        io_lib:format("    ~ts: print this message~n", [?HELP_ARG])
+        io_lib:format("    ~ts <String>: match <String> for log-message~n", [?STR_OPTION]),
+        io_lib:format("    ~ts <File>: read data from <File>~n", [?F_OPTION]),
+        io_lib:format("    ~ts: print this message~n", [?HELP_OPTION])
     ],
 
     io:format("~ts", [Str]).
 %%--------------------------------------------------------------------
 
--type parse_error() :: #{argument := Arg :: string(), reason := value_not_found | argument_not_present}.
+-type parse_error() :: #{argument := Arg :: string(), reason := value_not_found | option_not_present}.
 
-%% TODO подумать над названиями сущностей:
-%% Набор строк от юзера из шелла
-%% Мапа с распаршенным вводом
-%% Распаршенные рекорды, на основе которых вьюха вызывает нужную функцию
 %%--------------------------------------------------------------------
 %% @doc
+%% <pre>
+%% Набор строк от юзера из шелла - Argv
+%% Мапа с распаршенным вводом - Options
+%% Распаршенные рекорды, на основе которых вьюха вызывает нужную функцию - Command
+%% </pre>
+%% @end
 -spec parse_argv(Argv :: [string()]) ->
-    #args_stdin{} | #args_file{} | #args_help{} | [{error, Reason :: parse_error()}].
+    #cmd_stdin{} | #cmd_file{} | #cmd_help{} | [{error, Reason :: parse_error()}].
 %%--------------------------------------------------------------------
 parse_argv(Argv) ->
     WithValueFun =
-    fun(ArgMapAcc, Key) ->
+    fun(OptionsAcc, Key) ->
         case parse_key(Key, Argv) of
             {ok, Value} ->
-                validation:validation(ArgMapAcc#{Key => Value});
+                validation:validation(OptionsAcc#{Key => Value});
 
             {error, key_not_found} ->
-                validation:validation(ArgMapAcc);
+                validation:validation(OptionsAcc);
 
             {error, value_not_found} ->
                 validation:validation_error([{error, parse_error(Key, value_not_found)}])
@@ -112,16 +114,16 @@ parse_argv(Argv) ->
     end,
 
     NoValueFun =
-    fun(ArgMapAcc, Key) ->
+    fun(OptionsAcc, Key) ->
         case parse_key(Key, Argv) of
             {ok, Value} ->
-                validation:validation(ArgMapAcc#{Key => Value});
+                validation:validation(OptionsAcc#{Key => Value});
 
             {error, key_not_found} ->
-                validation:validation(ArgMapAcc);
+                validation:validation(OptionsAcc);
 
             {error, value_not_found} ->
-                validation:validation(ArgMapAcc#{Key => []})
+                validation:validation(OptionsAcc#{Key => []})
         end
     end,
 
@@ -130,9 +132,9 @@ parse_argv(Argv) ->
 
     ValidationPipe =
     compose:pipe([
-        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?F_ARG)) end,
-        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?STR_ARG)) end,
-        fun(Validation) -> validation:flatmap(Validation, NoValueFunCurried(?HELP_ARG)) end,
+        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?F_OPTION)) end,
+        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?STR_OPTION)) end,
+        fun(Validation) -> validation:flatmap(Validation, NoValueFunCurried(?HELP_OPTION)) end,
         %% Если накопили ошибки, то нет смысла двигаться дальше,
         %% Поэтому выполнится остановка
         fun(Validation) ->
@@ -145,18 +147,18 @@ parse_argv(Argv) ->
             end
         end,
         fun(Validation) ->
-            ArgMapAcc = validation:extract(Validation),
-            case maps:is_key(?HELP_ARG, ArgMapAcc) of
+            OptionsAcc = validation:extract(Validation),
+            case maps:is_key(?HELP_OPTION, OptionsAcc) of
                 true ->
-                    #args_help{};
+                    #cmd_help{};
 
                 false ->
-                    case maps:is_key(?F_ARG, ArgMapAcc) of
+                    case maps:is_key(?F_OPTION, OptionsAcc) of
                         true ->
-                            args_file(ArgMapAcc);
+                            cmd_file(OptionsAcc);
 
                         _false ->
-                            args_stdin(ArgMapAcc)
+                            cmd_stdin(OptionsAcc)
                     end
             end
         end
@@ -208,21 +210,21 @@ parse_key(Key, Argv) ->
 
 %%--------------------------------------------------------------------
 %% @doc
--spec args_file(ArgMap :: map()) ->
-    #args_file{} | [{error, Reason :: parse_error()}].
+-spec cmd_file(Options :: map()) ->
+    #cmd_file{} | [{error, Reason :: parse_error()}].
 %%--------------------------------------------------------------------
-args_file(ArgMap) ->
-    CheckKeyFunCurried = curry:curry_right(fun check_key/2),
+cmd_file(Options) ->
+    CheckOptionFunCurried = curry:curry_right(fun check_option/2),
 
     Validation =
     compose:run_pipe([
-        fun(Validation) -> validation:flatmap(Validation, CheckKeyFunCurried(?F_ARG)) end,
-        fun(Validation) -> validation:flatmap(Validation, CheckKeyFunCurried(?STR_ARG)) end
-    ], validation:validation(ArgMap)),
+        fun(Validation) -> validation:flatmap(Validation, CheckOptionFunCurried(?F_OPTION)) end,
+        fun(Validation) -> validation:flatmap(Validation, CheckOptionFunCurried(?STR_OPTION)) end
+    ], validation:validation(Options)),
 
     case validation:error_stack(Validation) of
         [] ->
-            #args_file{file = maps:get(?F_ARG, ArgMap), line_target = maps:get(?STR_ARG, ArgMap)};
+            #cmd_file{file = maps:get(?F_OPTION, Options), line_target = maps:get(?STR_OPTION, Options)};
 
         ErrorStack ->
             ErrorStack
@@ -231,20 +233,20 @@ args_file(ArgMap) ->
 
 %%--------------------------------------------------------------------
 %% @doc
--spec args_stdin(ArgMap :: map()) ->
-    #args_stdin{} | [{error, Reason :: parse_error()}].
+-spec cmd_stdin(Options :: map()) ->
+    #cmd_stdin{} | [{error, Reason :: parse_error()}].
 %%--------------------------------------------------------------------
-args_stdin(ArgMap) ->
-    CheckKeyFunCurried = curry:curry_right(fun check_key/2),
+cmd_stdin(Options) ->
+    CheckOptionFunCurried = curry:curry_right(fun check_option/2),
 
     Validation =
     compose:run_pipe([
-        fun(Validation) -> validation:flatmap(Validation, CheckKeyFunCurried(?STR_ARG)) end
-    ], validation:validation(ArgMap)),
+        fun(Validation) -> validation:flatmap(Validation, CheckOptionFunCurried(?STR_OPTION)) end
+    ], validation:validation(Options)),
 
     case validation:error_stack(Validation) of
         [] ->
-            #args_stdin{line_target = maps:get(?STR_ARG, ArgMap)};
+            #cmd_stdin{line_target = maps:get(?STR_OPTION, Options)};
 
         ErrorStack ->
             ErrorStack
@@ -253,16 +255,16 @@ args_stdin(ArgMap) ->
 
 %%--------------------------------------------------------------------
 %% @doc
--spec check_key(ArgMapArg :: map(), KeyArg :: string()) ->
+-spec check_option(Options :: map(), Option :: string()) ->
     validation:validation().
 %%--------------------------------------------------------------------
-check_key(ArgMapArg, KeyArg) ->
-    case maps:get(KeyArg, ArgMapArg, not_found) of
+check_option(Options, Option) ->
+    case maps:get(Option, Options, not_found) of
         not_found ->
-            validation:validation_error([{error, parse_error(KeyArg, argument_not_present)}]);
+            validation:validation_error([{error, parse_error(Option, option_not_present)}]);
 
         _Value ->
-            validation:validation(ArgMapArg)
+            validation:validation(Options)
     end.
 %%--------------------------------------------------------------------
 
@@ -290,7 +292,7 @@ print_parse_error(ParseError) ->
         value_not_found ->
             io_lib:format("Value for ~ts MUST be specified", [Arg]);
 
-        argument_not_present ->
+        option_not_present ->
             io_lib:format("~ts MUST be present", [Arg])
     end.
 %%--------------------------------------------------------------------
