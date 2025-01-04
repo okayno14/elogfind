@@ -37,8 +37,10 @@ main(Argv) ->
         #args_help{} ->
             print_help();
 
-        {error, not_found} ->
-            {error, "Invalid Args"}
+        %% TODO надо как-то более элегантно выводить инфу об ошибках
+        ErrorStack ->
+            io:format(standard_error, "ErrorStack: ~p~n", [ErrorStack]),
+            ok
     end,
 
     case Status of
@@ -82,24 +84,29 @@ print_help() ->
     io:format("~ts", [Str]).
 %%--------------------------------------------------------------------
 
-%% TODO тут неплохо использовать Validation-монаду: проверка правильности ключей
+-type parse_error() :: #{argument := Arg :: string(), reason := atom()}.
+
+%% TODO подумать над названиями сущностей:
+%% Набор строк от юзера из шелла
+%% Мапа с распаршенным вводом
+%% Распаршенные рекорды, на основе которых вьюха вызывает нужную функцию
 %%--------------------------------------------------------------------
 %% @doc
 -spec parse_argv(Argv :: [string()]) ->
-    #args_stdin{} | #args_file{} | {error, not_found}.
+    #args_stdin{} | #args_file{} | #args_help{} | [{error, Reason :: parse_error()}].
 %%--------------------------------------------------------------------
 parse_argv(Argv) ->
     WithValueFun =
     fun(ArgMapAcc, Key) ->
         case parse_key(Key, Argv) of
             {ok, Value} ->
-                ArgMapAcc#{Key => Value};
+                validation:validation(ArgMapAcc#{Key => Value});
 
             {error, key_not_found} ->
-                ArgMapAcc;
+                validation:validation(ArgMapAcc);
 
             {error, value_not_found} ->
-                {error, not_found}
+                validation:validation_error([{error, parse_error(Key, value_not_found)}])
         end
     end,
 
@@ -107,21 +114,37 @@ parse_argv(Argv) ->
     fun(ArgMapAcc, Key) ->
         case parse_key(Key, Argv) of
             {ok, Value} ->
-                ArgMapAcc#{Key => Value};
+                validation:validation(ArgMapAcc#{Key => Value});
 
             {error, key_not_found} ->
-                ArgMapAcc;
+                validation:validation(ArgMapAcc);
 
             {error, value_not_found} ->
-                ArgMapAcc#{Key => []}
+                validation:validation(ArgMapAcc#{Key => []})
         end
     end,
 
-    compose:run_pipe([
-        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?F_ARG) end,
-        fun(ArgMapAcc) -> WithValueFun(ArgMapAcc, ?STR_ARG) end,
-        fun(ArgMapAcc) -> NoValueFun(ArgMapAcc, ?HELP_ARG) end,
-        fun(ArgMapAcc) ->
+    WithValueFunCurried = curry:curry_right(WithValueFun),
+    NoValueFunCurried = curry:curry_right(NoValueFun),
+
+    ValidationPipe =
+    compose:pipe([
+        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?F_ARG)) end,
+        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?STR_ARG)) end,
+        fun(Validation) -> validation:flatmap(Validation, NoValueFunCurried(?HELP_ARG)) end,
+        %% Если накопили ошибки, то нет смысла двигаться дальше,
+        %% Поэтому выполнится остановка
+        fun(Validation) ->
+            case validation:error_stack(Validation) of
+                [] ->
+                    Validation;
+
+                ErrorStack ->
+                    {error, ErrorStack}
+            end
+        end,
+        fun(Validation) ->
+            ArgMapAcc = validation:extract(Validation),
             case maps:is_key(?HELP_ARG, ArgMapAcc) of
                 true ->
                     #args_help{};
@@ -136,55 +159,16 @@ parse_argv(Argv) ->
                     end
             end
         end
-    ], #{}).
-%%--------------------------------------------------------------------
+    ]),
 
-%% TODO вот тут неплохо бы смотрелась Validation-монада: проверка наличия ключей
-%%--------------------------------------------------------------------
-%% @doc
--spec args_file(ArgMap :: map()) ->
-    #args_file{} | {error, not_found}.
-%%--------------------------------------------------------------------
-args_file(ArgMap) ->
-    compose:run_pipe([
-        fun(ArgsFileAcc) ->
-            case maps:get(?F_ARG, ArgMap, not_found) of
-                not_found ->
-                    {error, not_found};
+    case ValidationPipe(validation:validation(#{})) of
+        {error, ErrorStack} ->
+            ErrorStack;
 
-                File ->
-                    ArgsFileAcc#args_file{file = File}
-            end
-        end,
-        fun(ArgsFileAcc) ->
-            case maps:get(?STR_ARG, ArgMap, not_found) of
-                not_found ->
-                    {error, not_found};
-
-                LineTarget ->
-                    ArgsFileAcc#args_file{line_target = LineTarget}
-            end
-        end
-    ], #args_file{}).
-%%--------------------------------------------------------------------
-
-%%--------------------------------------------------------------------
-%% @doc
--spec args_stdin(ArgMap :: map()) ->
-    #args_stdin{} | {error, not_found}.
-%%--------------------------------------------------------------------
-args_stdin(ArgMap) ->
-    compose:run_pipe([
-        fun(ArgsSTDINAcc) ->
-            case maps:get(?STR_ARG, ArgMap, not_found) of
-                not_found ->
-                    {error, not_found};
-
-                LineTarget ->
-                    ArgsSTDINAcc#args_stdin{line_target = LineTarget}
-            end
-        end
-    ], #args_stdin{}).
+        %% Может вернуться как готовый объект, так и ErrorStack билдера
+        Ret ->
+            Ret
+    end.
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
@@ -219,6 +203,79 @@ parse_key(Key, Argv) ->
 
         end
     ], Argv).
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec args_file(ArgMap :: map()) ->
+    #args_file{} | [{error, Reason :: parse_error()}].
+%%--------------------------------------------------------------------
+args_file(ArgMap) ->
+    CheckKeyFunCurried = curry:curry_right(fun check_key/2),
+
+    Validation =
+    compose:run_pipe([
+        fun(Validation) -> validation:flatmap(Validation, CheckKeyFunCurried(?F_ARG)) end,
+        fun(Validation) -> validation:flatmap(Validation, CheckKeyFunCurried(?STR_ARG)) end
+    ], validation:validation(ArgMap)),
+
+    case validation:error_stack(Validation) of
+        [] ->
+            #args_file{file = maps:get(?F_ARG, ArgMap), line_target = maps:get(?STR_ARG, ArgMap)};
+
+        ErrorStack ->
+            ErrorStack
+    end.
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec args_stdin(ArgMap :: map()) ->
+    #args_stdin{} | [{error, Reason :: parse_error()}].
+%%--------------------------------------------------------------------
+args_stdin(ArgMap) ->
+    CheckKeyFunCurried = curry:curry_right(fun check_key/2),
+
+    Validation =
+    compose:run_pipe([
+        fun(Validation) -> validation:flatmap(Validation, CheckKeyFunCurried(?STR_ARG)) end
+    ], validation:validation(ArgMap)),
+
+    case validation:error_stack(Validation) of
+        [] ->
+            #args_stdin{line_target = maps:get(?STR_ARG, ArgMap)};
+
+        ErrorStack ->
+            ErrorStack
+    end.
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec check_key(ArgMapArg :: map(), KeyArg :: string()) ->
+    validation:validation().
+%%--------------------------------------------------------------------
+check_key(ArgMapArg, KeyArg) ->
+    case maps:get(KeyArg, ArgMapArg, not_found) of
+        not_found ->
+            validation:validation_error([{error, parse_error(KeyArg, argument_not_present)}]);
+
+        _Value ->
+            validation:validation(ArgMapArg)
+    end.
+%%--------------------------------------------------------------------
+
+%%%===================================================================
+%%% parse_error
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec parse_error(Arg :: string(), Reason :: atom()) ->
+    parse_error().
+%%--------------------------------------------------------------------
+parse_error(Arg, Reason) ->
+    #{argument => Arg, reason => Reason}.
 %%--------------------------------------------------------------------
 
 %%====================================================================
