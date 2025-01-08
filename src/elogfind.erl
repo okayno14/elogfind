@@ -32,7 +32,7 @@ main(Argv) ->
             run_fsm_io(standard_io, CMDSTDIN#cmd_stdin.line_target);
 
         CMDFile = #cmd_file{} ->
-            run_fsm_file_stdout(CMDFile);
+            run_cmd_file(CMDFile);
 
         #cmd_help{} ->
             print_help();
@@ -52,17 +52,16 @@ main(Argv) ->
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
--spec run_fsm_file_stdout(CMDFile :: #cmd_file{}) ->
+-spec run_cmd_file(CMDFile :: #cmd_file{}) ->
     ok | {error, Reason :: string()}.
 %%--------------------------------------------------------------------
-%% TODO чтение файла перетащить в контроллер. Тут только билдим строку с ошибкой
-run_fsm_file_stdout(CMDFile) ->
-    case file:open(CMDFile#cmd_file.file, [read]) of
-        {ok, IoDevice} ->
-            run_fsm_io(IoDevice, CMDFile#cmd_file.line_target);
+run_cmd_file(CMDFile) ->
+    case run_fsm_file_stdout(CMDFile#cmd_file.file, CMDFile#cmd_file.line_target) of
+        ok ->
+            ok;
 
-        {error, Reason} ->
-            {error, io_lib:format("Failed to open file ~p by Reason:~p~n", [CMDFile#cmd_file.file, Reason])}
+        {error, {file, Reason}} ->
+            {error, io_lib:format("Failed to open file ~ts by Reason: ~p~n", [CMDFile#cmd_file.file, Reason])}
     end.
 %%--------------------------------------------------------------------
 
@@ -345,6 +344,21 @@ parse_key(Key, Argv) ->
 %%====================================================================
 %% Controller.fsm_runners
 %%====================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec run_fsm_file_stdout(File :: string(), LineTarget :: string()) ->
+    ok | {error, {file, _Reason}}.
+%%--------------------------------------------------------------------
+run_fsm_file_stdout(File, LineTarget) ->
+    case file:open(File, [read]) of
+        {ok, IoDevice} ->
+            run_fsm_io(IoDevice, LineTarget);
+
+        {error, Reason} ->
+            {error, {file, Reason}}
+    end.
+%%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
 -spec run_fsm_io(Device :: io:device(), LineTarget :: string()) ->
