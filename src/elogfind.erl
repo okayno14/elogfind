@@ -37,12 +37,8 @@ main(Argv) ->
         #cmd_help{} ->
             print_help();
 
-        ErrorStack ->
-            %% TODO здесь код должен просто печатать полученный набор строк с ошибками.
-            %% Если ошибка на уровне парсинга - то на выходе из его функции билдим строки ошибок
-            %% Если ошибка от контроллера - то подготовка строки делается в точке вызова из View
-            ErrorMsg = [[print_parse_error(ParseError), "\n"] || {error, ParseError} <- ErrorStack],
-            {error, ErrorMsg}
+        Error ->
+            Error
     end,
 
     case Status of
@@ -98,9 +94,30 @@ print_help() ->
 %% </pre>
 %% @end
 -spec route_cmd(Argv :: [string()]) ->
-    #cmd_stdin{} | #cmd_file{} | #cmd_help{} | [{error, Reason :: parse_error()}].
+    #cmd_stdin{} | #cmd_file{} | #cmd_help{} | {error, [Reason :: string()]}.
 %%--------------------------------------------------------------------
 route_cmd(Argv) ->
+    case route_cmd2(Argv) of
+        ErrorStack = [{error, _} | _] ->
+            {error, [[print_parse_error(ParseError), "\n"] || {error, ParseError} <- ErrorStack]};
+
+        CMD ->
+            CMD
+    end.
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+%% <pre>
+%% Набор строк от юзера из шелла - Argv
+%% Мапа с распаршенным вводом - Options
+%% Распаршенные рекорды, на основе которых вьюха вызывает нужную функцию - Command
+%% </pre>
+%% @end
+-spec route_cmd2(Argv :: [string()]) ->
+    #cmd_stdin{} | #cmd_file{} | #cmd_help{} | [{error, Reason :: parse_error()}].
+%%--------------------------------------------------------------------
+route_cmd2(Argv) ->
     Pipe =
     compose:pipe([
         fun
@@ -611,9 +628,72 @@ nth(N, [_|T]) when N > 1 ->
 %%% Test
 %%%===================================================================
 
-%% TODO надоело перезапускать команду с разными аргментами. Надо написать тест парсинга опций
+route_cmd_test_() ->
+    [
+        {"stdin cmd", fun stdin_cmd/0},
+        {"file cmd", fun file_cmd/0},
+        {"help cmd", fun help_cmd/0},
+        {"keys without values", fun no_val_cmd/0},
+        {"not enough options", fun not_enough_options/0}
+    ].
 
-base_test_() ->
+stdin_cmd() ->
+    %% INIT
+    Argv = [?STR_OPTION, "some_string"],
+
+    %% ACT
+    Value = route_cmd2(Argv),
+
+    %% ASSERT
+    ?assertEqual(#cmd_stdin{line_target = "some_string"}, Value).
+
+file_cmd() ->
+    %% INIT
+    Argv = [?STR_OPTION, "some_string", ?F_OPTION, "some_file"],
+
+    %% ACT
+    Value = route_cmd2(Argv),
+
+    %% ASSERT
+    ?assertEqual(#cmd_file{line_target = "some_string", file = "some_file"}, Value).
+
+help_cmd() ->
+    %% INIT
+    Argv = [?HELP_OPTION],
+
+    %% ACT
+    Value = route_cmd2(Argv),
+
+    %% ASSERT
+    ?assertEqual(#cmd_help{}, Value).
+
+no_val_cmd() ->
+    %% INIT
+    Argv = [?STR_OPTION, ?F_OPTION],
+
+    %% ACT
+    Value = route_cmd2(Argv),
+
+    %% ASSERT
+    ?assertEqual(
+        [
+            {error, parse_error(?F_OPTION, value_not_found)},
+            {error, parse_error(?STR_OPTION, value_not_found)}
+        ],
+        Value
+    ).
+
+not_enough_options() ->
+    %% INIT
+    Argv = [?F_OPTION, "some_file"],
+
+    %% ACT
+    Value = route_cmd2(Argv),
+
+    %% ASSERT
+    ?assertEqual([{error, parse_error(?STR_OPTION, option_not_present)}], Value).
+
+fsm_test_() ->
     [
         {"1 multiline", fun case1/0},
         {"1 multiline, 1 singleline", fun case2/0},
