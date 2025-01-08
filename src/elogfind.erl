@@ -27,7 +27,7 @@
 %%--------------------------------------------------------------------
 main(Argv) ->
     Status =
-    case parse_argv(Argv) of
+    case route_cmd(Argv) of
         CMDSTDIN = #cmd_stdin{} ->
             run_fsm_io(standard_io, CMDSTDIN#cmd_stdin.line_target);
 
@@ -38,6 +38,9 @@ main(Argv) ->
             print_help();
 
         ErrorStack ->
+            %% TODO здесь код должен просто печатать полученный набор строк с ошибками.
+            %% Если ошибка на уровне парсинга - то на выходе из его функции билдим строки ошибок
+            %% Если ошибка от контроллера - то подготовка строки делается в точке вызова из View
             ErrorMsg = [[print_parse_error(ParseError), "\n"] || {error, ParseError} <- ErrorStack],
             {error, ErrorMsg}
     end,
@@ -56,6 +59,7 @@ main(Argv) ->
 -spec run_fsm_file_stdout(CMDFile :: #cmd_file{}) ->
     ok | {error, Reason :: string()}.
 %%--------------------------------------------------------------------
+%% TODO чтение файла перетащить в контроллер. Тут только билдим строку с ошибкой
 run_fsm_file_stdout(CMDFile) ->
     case file:open(CMDFile#cmd_file.file, [read]) of
         {ok, IoDevice} ->
@@ -85,8 +89,6 @@ print_help() ->
     io:format("~ts", [Str]).
 %%--------------------------------------------------------------------
 
--type parse_error() :: #{argument := Arg :: string(), reason := value_not_found | option_not_present}.
-
 %%--------------------------------------------------------------------
 %% @doc
 %% <pre>
@@ -95,118 +97,43 @@ print_help() ->
 %% Распаршенные рекорды, на основе которых вьюха вызывает нужную функцию - Command
 %% </pre>
 %% @end
--spec parse_argv(Argv :: [string()]) ->
+-spec route_cmd(Argv :: [string()]) ->
     #cmd_stdin{} | #cmd_file{} | #cmd_help{} | [{error, Reason :: parse_error()}].
 %%--------------------------------------------------------------------
-parse_argv(Argv) ->
-    WithValueFun =
-    fun(OptionsAcc, Key) ->
-        case parse_key(Key, Argv) of
-            {ok, Value} ->
-                validation:validation(OptionsAcc#{Key => Value});
-
-            {error, key_not_found} ->
-                validation:validation(OptionsAcc);
-
-            {error, value_not_found} ->
-                validation:validation_error([{error, parse_error(Key, value_not_found)}])
-        end
-    end,
-
-    NoValueFun =
-    fun(OptionsAcc, Key) ->
-        case parse_key(Key, Argv) of
-            {ok, Value} ->
-                validation:validation(OptionsAcc#{Key => Value});
-
-            {error, key_not_found} ->
-                validation:validation(OptionsAcc);
-
-            {error, value_not_found} ->
-                validation:validation(OptionsAcc#{Key => []})
-        end
-    end,
-
-    WithValueFunCurried = curry:curry_right(WithValueFun),
-    NoValueFunCurried = curry:curry_right(NoValueFun),
-
-    ValidationPipe =
+route_cmd(Argv) ->
+    Pipe =
     compose:pipe([
-        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?F_OPTION)) end,
-        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?STR_OPTION)) end,
-        fun(Validation) -> validation:flatmap(Validation, NoValueFunCurried(?HELP_OPTION)) end,
-        %% Если накопили ошибки, то нет смысла двигаться дальше,
-        %% Поэтому выполнится остановка
-        fun(Validation) ->
-            case validation:extract_error_stack(Validation) of
-                [] ->
-                    Validation;
+        fun
+        ({ok, Options}) ->
+            either:right(Options);
 
-                ErrorStack ->
-                    {error, ErrorStack}
-            end
+        ({error, ErrorStack}) ->
+            either:left(ErrorStack)
+
         end,
-        fun(Validation) ->
-            OptionsAcc = validation:extract(Validation),
-            case maps:is_key(?HELP_OPTION, OptionsAcc) of
-                true ->
-                    #cmd_help{};
 
-                false ->
-                    case maps:is_key(?F_OPTION, OptionsAcc) of
-                        true ->
-                            cmd_file(OptionsAcc);
+        fun(Either) ->
+            either:map(Either,
+                fun
+                    (#{?HELP_OPTION := _} = _Options) ->
+                        #cmd_help{};
 
-                        _false ->
-                            cmd_stdin(OptionsAcc)
-                    end
-            end
+                    (#{?F_OPTION := _} = Options) ->
+                        cmd_file(Options);
+
+                    (Options) ->
+                        cmd_stdin(Options)
+                end
+            )
         end
     ]),
 
-    case ValidationPipe(validation:validation(#{})) of
-        {error, ErrorStack} ->
-            ErrorStack;
-
-        %% Может вернуться как готовый объект, так и ErrorStack билдера
-        Ret ->
-            Ret
-    end.
+    either:extract(Pipe(options(Argv))).
 %%--------------------------------------------------------------------
 
-%%--------------------------------------------------------------------
-%% @doc
--spec parse_key(Key :: string(), Argv :: [string()]) ->
-    {ok, Value :: string()} | {error, key_not_found | value_not_found}.
-%%--------------------------------------------------------------------
-parse_key(Key, Argv) ->
-    Pred = fun(E) when E =/= Key -> true; (_E) -> false end,
-    compose:run_pipe([
-        fun(ArgvAcc) ->
-            case lists:dropwhile(Pred, ArgvAcc) of
-                [] ->
-                    {error, key_not_found};
-
-                ArgvAcc2 ->
-                    ArgvAcc2
-            end
-        end,
-        fun(ArgvAcc) ->
-            case nth(2, ArgvAcc) of
-                %% Следующий элемент - ключ, надо вернуть ошибку
-                [$- | _] ->
-                    {error, value_not_found};
-
-                [] ->
-                    {error, value_not_found};
-
-                Elem ->
-                    {ok, Elem}
-            end
-
-        end
-    ], Argv).
-%%--------------------------------------------------------------------
+%%%===================================================================
+%%% View.command_builder
+%%%===================================================================
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -253,6 +180,67 @@ cmd_stdin(Options) ->
     end.
 %%--------------------------------------------------------------------
 
+%%%===================================================================
+%%% View.argv_parse.options_builder
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+-spec options(Argv :: [string()]) ->
+    {ok, map()} | {error, [{error, Reason :: parse_error()}]}.
+%%--------------------------------------------------------------------
+options(Argv) ->
+    WithValueFun =
+    fun(OptionsAcc, Key) ->
+        case parse_key(Key, Argv) of
+            {ok, Value} ->
+                validation:validation(OptionsAcc#{Key => Value});
+
+            {error, key_not_found} ->
+                validation:validation(OptionsAcc);
+
+            {error, value_not_found} ->
+                validation:validation_error([{error, parse_error(Key, value_not_found)}])
+        end
+    end,
+
+    NoValueFun =
+    fun(OptionsAcc, Key) ->
+        case parse_key(Key, Argv) of
+            {ok, Value} ->
+                validation:validation(OptionsAcc#{Key => Value});
+
+            {error, key_not_found} ->
+                validation:validation(OptionsAcc);
+
+            {error, value_not_found} ->
+                validation:validation(OptionsAcc#{Key => []})
+        end
+    end,
+
+    WithValueFunCurried = curry:curry_right(WithValueFun),
+    NoValueFunCurried = curry:curry_right(NoValueFun),
+
+    ValidationPipe =
+    compose:pipe([
+        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?F_OPTION)) end,
+        fun(Validation) -> validation:flatmap(Validation, WithValueFunCurried(?STR_OPTION)) end,
+        fun(Validation) -> validation:flatmap(Validation, NoValueFunCurried(?HELP_OPTION)) end
+    ]),
+
+    Validation = ValidationPipe(validation:validation(#{})),
+    case validation:extract_error_stack(Validation) of
+        [] ->
+            {ok, validation:extract(Validation)};
+
+        ErrorStack ->
+            {error, ErrorStack}
+    end.
+%%--------------------------------------------------------------------
+
+%%%===================================================================
+%%% View.argv_parse.options
+%%%===================================================================
+
 %%--------------------------------------------------------------------
 %% @doc
 -spec check_option(Options :: map(), Option :: string()) ->
@@ -269,8 +257,10 @@ check_option(Options, Option) ->
 %%--------------------------------------------------------------------
 
 %%%===================================================================
-%%% parse_error
+%%% View.argv_parse.options.parse_error
 %%%===================================================================
+
+-type parse_error() :: #{argument := Arg :: string(), reason := value_not_found | option_not_present}.
 
 %%--------------------------------------------------------------------
 %% @doc
@@ -297,8 +287,46 @@ print_parse_error(ParseError) ->
     end.
 %%--------------------------------------------------------------------
 
+%%%===================================================================
+%%% View.argv_parse.options.parse_key
+%%%===================================================================
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec parse_key(Key :: string(), Argv :: [string()]) ->
+    {ok, Value :: string()} | {error, key_not_found | value_not_found}.
+%%--------------------------------------------------------------------
+parse_key(Key, Argv) ->
+    Pred = fun(E) when E =/= Key -> true; (_E) -> false end,
+    compose:run_pipe([
+        fun(ArgvAcc) ->
+            case lists:dropwhile(Pred, ArgvAcc) of
+                [] ->
+                    {error, key_not_found};
+
+                ArgvAcc2 ->
+                    ArgvAcc2
+            end
+        end,
+        fun(ArgvAcc) ->
+            case nth(2, ArgvAcc) of
+                %% Следующий элемент - ключ, надо вернуть ошибку
+                [$- | _] ->
+                    {error, value_not_found};
+
+                [] ->
+                    {error, value_not_found};
+
+                Elem ->
+                    {ok, Elem}
+            end
+
+        end
+    ], Argv).
+%%--------------------------------------------------------------------
+
 %%====================================================================
-%% fsm_runners
+%% Controller.fsm_runners
 %%====================================================================
 
 %%--------------------------------------------------------------------
@@ -582,6 +610,8 @@ nth(N, [_|T]) when N > 1 ->
 %%%===================================================================
 %%% Test
 %%%===================================================================
+
+%% TODO надоело перезапускать команду с разными аргментами. Надо написать тест парсинга опций
 
 base_test_() ->
     [
