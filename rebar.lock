@@ -1,4 +1,4 @@
 [{<<"erl_utils">>,
   {git,"https://github.com/okayno14/erl_utils.git",
-       {ref,"889c8ec59576770ed9b38b1bfe35b1f668c4d42d"}},
+       {ref,"c8bbaf5e4a6acd171e1e982561bd99b782240067"}},
   0}].

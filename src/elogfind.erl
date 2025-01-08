@@ -138,7 +138,7 @@ parse_argv(Argv) ->
         %% Если накопили ошибки, то нет смысла двигаться дальше,
         %% Поэтому выполнится остановка
         fun(Validation) ->
-            case validation:error_stack(Validation) of
+            case validation:extract_error_stack(Validation) of
                 [] ->
                     Validation;
 
@@ -222,7 +222,7 @@ cmd_file(Options) ->
         fun(Validation) -> validation:flatmap(Validation, CheckOptionFunCurried(?STR_OPTION)) end
     ], validation:validation(Options)),
 
-    case validation:error_stack(Validation) of
+    case validation:extract_error_stack(Validation) of
         [] ->
             #cmd_file{file = maps:get(?F_OPTION, Options), line_target = maps:get(?STR_OPTION, Options)};
 
@@ -244,7 +244,7 @@ cmd_stdin(Options) ->
         fun(Validation) -> validation:flatmap(Validation, CheckOptionFunCurried(?STR_OPTION)) end
     ], validation:validation(Options)),
 
-    case validation:error_stack(Validation) of
+    case validation:extract_error_stack(Validation) of
         [] ->
             #cmd_stdin{line_target = maps:get(?STR_OPTION, Options)};
 
