@@ -6,7 +6,18 @@
 -export([main/1]).
 
 -define(LOG_LEVEL_LABEL_LIST, [
-    "ERROR", "WARN", "INFO", "TRACE", "DEBUG", "CONSOLE"
+    "ERROR",
+    "WARN",
+    "INFO",
+    "TRACE",
+    "DEBUG",
+    "CONSOLE",
+    "NOTICE",
+    "WARNING",
+    "ERR",
+    "CRITICAL",
+    "ALERT",
+    "EMERGENCY"
 ]).
 
 -record(cmd_file, {line_target :: string(), file :: string()}).
