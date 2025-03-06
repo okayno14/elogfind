@@ -725,7 +725,8 @@ fsm_test_() ->
         {"1 singleline", fun case3/0},
         {"1 multiline, 1 multiline", fun case6/0},
         {"1 multiline not match, 1 singleline", fun case4/0},
-        {"1 multiline, 1 singleline not match", fun case5/0}
+        {"1 multiline, 1 singleline not match", fun case5/0},
+        {"1 singleline, level small case", fun case7/0}
     ].
 
 case1() ->
@@ -849,3 +850,19 @@ case6() ->
     ?assertEqual(msg_state("hello"), FSM),
     ok.
 
+case7() ->
+    SampleList = [
+        "info hello",
+        eof
+    ],
+
+    FinalList = [
+        "info hello"
+    ],
+
+    {Out, FSM} = run_fsm_string_list(SampleList, "hello"),
+    ?LOG_DEBUG("=======", []),
+
+    ?assertEqual(FinalList, Out),
+    ?assertEqual(msg_state("hello"), FSM),
+    ok.
