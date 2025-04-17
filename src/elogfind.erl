@@ -40,7 +40,7 @@ main(Argv) ->
     Status =
     case route_cmd(Argv) of
         CMDSTDIN = #cmd_stdin{} ->
-            run_fsm_io(standard_io, CMDSTDIN#cmd_stdin.line_target);
+            run_cmd_stdio(CMDSTDIN);
 
         CMDFile = #cmd_file{} ->
             run_cmd_file(CMDFile);
@@ -60,6 +60,16 @@ main(Argv) ->
         _ok ->
             0
     end.
+%%--------------------------------------------------------------------
+
+%%--------------------------------------------------------------------
+%% @doc
+-spec run_cmd_stdio(CMDSTDIN :: #cmd_stdin{}) ->
+    ok | {error, Reason :: string()}.
+%%--------------------------------------------------------------------
+run_cmd_stdio(CMDSTDIN) ->
+    io:setopts(standard_io, [binary]),
+    run_fsm_io(standard_io, CMDSTDIN#cmd_stdin.line_target).
 %%--------------------------------------------------------------------
 
 %%--------------------------------------------------------------------
@@ -495,6 +505,7 @@ fsm_begin(Line, LineTarget) ->
     fsm_input(Line, msg_state(LineTarget), []).
 %%--------------------------------------------------------------------
 
+%% TODO исправить спеку - Line может быть бинарём, перепроверить остальные типы
 %%--------------------------------------------------------------------
 %% @doc
 -spec fsm_input(Line :: line_input(), MsgState :: msg_state()) ->
