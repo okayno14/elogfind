@@ -372,7 +372,7 @@ parse_key(Key, Argv) ->
     ok | {error, {file, _Reason}}.
 %%--------------------------------------------------------------------
 run_fsm_file_stdout(File, LineTarget) ->
-    case file:open(File, [read]) of
+    case file:open(File, [read, binary]) of
         {ok, IoDevice} ->
             run_fsm_io(IoDevice, LineTarget);
 
